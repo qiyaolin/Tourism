@@ -1,0 +1,10 @@
+tunnel: atlas-dev
+credentials-file: C:\path\to\credentials.json
+
+ingress:
+  - hostname: api.example.com
+    service: http://localhost:8000
+  - hostname: app.example.com
+    service: http://localhost:5173
+  - service: http_status:404
+
