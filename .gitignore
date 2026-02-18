@@ -14,8 +14,16 @@ __pycache__/
 # Node
 node_modules/
 dist/
+.pnpm-store/
+frontend/.pnpm-store/
 
 # Env/secrets
 .env
 *.env.local
 
+# Local temp / test artifacts
+.tmp-playwright/
+tmp_playwright_check.cjs
+
+# Python packaging artifacts
+*.egg-info/

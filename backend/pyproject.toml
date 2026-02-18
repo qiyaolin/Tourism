@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "atlas-backend"
 version = "0.1.0"
@@ -8,7 +12,10 @@ dependencies = [
   "uvicorn[standard]>=0.34.0",
   "pydantic-settings>=2.7.1",
   "sqlalchemy>=2.0.38",
-  "psycopg[binary]>=3.2.5"
+  "psycopg[binary]>=3.2.5",
+  "bcrypt>=4.2.1",
+  "python-jose[cryptography]>=3.3.0",
+  "alembic>=1.14.1"
 ]
 
 [dependency-groups]
@@ -29,3 +36,5 @@ select = ["E", "F", "I", "UP"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.setuptools.packages.find]
+include = ["app*"]
