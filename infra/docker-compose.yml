@@ -27,7 +27,7 @@ services:
     container_name: atlas-backend
     restart: unless-stopped
     env_file:
-      - ../backend/.env.example
+      - ../backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://atlas:atlas@postgres:5432/atlas
       CORS_ALLOW_ORIGINS: http://localhost:5173,http://frontend:5173

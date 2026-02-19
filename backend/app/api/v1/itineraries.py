@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.itinerary import (
     ItineraryCreate,
+    ItineraryDiffResponse,
     ItineraryItemCreate,
     ItineraryItemResponse,
     ItineraryItemsWithPoiListResponse,
@@ -22,6 +23,7 @@ from app.services.itinerary_service import (
     delete_item,
     delete_itinerary,
     get_itinerary,
+    get_itinerary_diff,
     list_items_with_poi,
     list_itineraries,
     update_item,
@@ -57,6 +59,15 @@ def get_itinerary_api(
     current_user: User = Depends(get_current_user),
 ) -> ItineraryResponse:
     return get_itinerary(db, itinerary_id, current_user)
+
+
+@router.get("/{itinerary_id}/diff", response_model=ItineraryDiffResponse)
+def get_itinerary_diff_api(
+    itinerary_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ItineraryDiffResponse:
+    return get_itinerary_diff(db, itinerary_id, current_user)
 
 
 @router.get("/{itinerary_id}/items", response_model=ItineraryItemsWithPoiListResponse)

@@ -27,3 +27,7 @@ tmp_playwright_check.cjs
 
 # Python packaging artifacts
 *.egg-info/
+
+backend/.env
+
+frontend/.env
