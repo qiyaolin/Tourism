@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -32,6 +32,7 @@ class Itinerary(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="private")
     cover_image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    start_date: Mapped[date | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

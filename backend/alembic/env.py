@@ -7,7 +7,22 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import itinerary, itinerary_item, poi, user, verification_code  # noqa: F401
+from app.models import (  # noqa: F401
+    itinerary,
+    itinerary_diff_action,
+    itinerary_fork,
+    itinerary_item,
+    itinerary_snapshot,
+    poi,
+    poi_correction,
+    poi_correction_notification,
+    poi_correction_type,
+    poi_ticket_rule,
+    pricing_audience,
+    user,
+    user_notification,
+    verification_code,
+)
 
 config = context.config
 if config.config_file_name is not None:

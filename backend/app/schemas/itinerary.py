@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any, Literal
 from uuid import UUID
 
@@ -12,6 +12,7 @@ class ItineraryCreate(BaseModel):
     status: str = Field(default="draft")
     visibility: str = Field(default="private")
     cover_image_url: str | None = Field(default=None, max_length=512)
+    start_date: date | None = None
 
 
 class ItineraryUpdate(BaseModel):
@@ -21,6 +22,7 @@ class ItineraryUpdate(BaseModel):
     status: str | None = None
     visibility: str | None = None
     cover_image_url: str | None = Field(default=None, max_length=512)
+    start_date: date | None = None
 
 
 class ItineraryResponse(BaseModel):
@@ -32,6 +34,7 @@ class ItineraryResponse(BaseModel):
     status: str
     visibility: str
     cover_image_url: str | None
+    start_date: date | None = None
     fork_source_itinerary_id: UUID | None = None
     fork_source_author_nickname: str | None = None
     fork_source_title: str | None = None
@@ -102,6 +105,15 @@ class ItineraryItemResponse(BaseModel):
 
 
 class ItineraryItemPoiSnapshot(BaseModel):
+    class TicketRuleSnapshot(BaseModel):
+        audience_code: str
+        audience_label: str
+        ticket_type: str
+        time_slot: str
+        price: float
+        currency: str
+        conditions: str | None
+
     id: UUID
     name: str
     type: str
@@ -110,6 +122,7 @@ class ItineraryItemPoiSnapshot(BaseModel):
     address: str | None
     opening_hours: str | None
     ticket_price: float | None
+    ticket_rules: list[TicketRuleSnapshot] = Field(default_factory=list)
 
 
 class ItineraryItemWithPoiResponse(BaseModel):

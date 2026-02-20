@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import date, time
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +13,8 @@ from app.models.itinerary_fork import ItineraryFork
 from app.models.itinerary_item import ItineraryItem
 from app.models.itinerary_snapshot import ItinerarySnapshot
 from app.models.poi import Poi
+from app.models.poi_ticket_rule import PoiTicketRule
+from app.models.pricing_audience import PricingAudience
 from app.models.user import User
 from app.schemas.itinerary import (
     ForkItineraryResponse,
@@ -39,8 +41,9 @@ from app.schemas.itinerary import (
     PublicItineraryListResponse,
     PublicItineraryResponse,
 )
+from app.services.notification_service import notify_source_itinerary_updated
 
-_META_DIFF_FIELDS = ("title", "destination", "days", "status", "visibility", "cover_image_url")
+_META_DIFF_FIELDS = ("title", "destination", "days", "status", "visibility", "cover_image_url", "start_date")
 _ITEM_DIFF_FIELDS = (
     "day_index",
     "sort_order",
@@ -110,6 +113,7 @@ def _itinerary_to_response(
         status=row.status,
         visibility=row.visibility,
         cover_image_url=row.cover_image_url,
+        start_date=row.start_date,
         fork_source_itinerary_id=source_id,
         fork_source_author_nickname=source_nickname,
         fork_source_title=source_title,
@@ -142,6 +146,36 @@ def _parse_point_text(value: str) -> tuple[float, float]:
     raw = value.strip().removeprefix("POINT(").removesuffix(")")
     lon_str, lat_str = raw.split(" ", maxsplit=1)
     return float(lon_str), float(lat_str)
+
+
+def _rules_for_poi_ids(db: Session, poi_ids: list[UUID]) -> dict[UUID, list[ItineraryItemPoiSnapshot.TicketRuleSnapshot]]:
+    if not poi_ids:
+        return {}
+    stmt = (
+        select(PoiTicketRule, PricingAudience.label)
+        .join(PricingAudience, PricingAudience.code == PoiTicketRule.audience_code)
+        .where(PoiTicketRule.poi_id.in_(poi_ids), PoiTicketRule.is_active.is_(True))
+        .order_by(PoiTicketRule.poi_id.asc(), PricingAudience.sort_order.asc(), PoiTicketRule.price.asc())
+    )
+    result: dict[UUID, list[ItineraryItemPoiSnapshot.TicketRuleSnapshot]] = {}
+    for row in db.execute(stmt).all():
+        if not isinstance(row, (tuple, list)) or len(row) != 2:
+            continue
+        rule, audience_label = row
+        if not hasattr(rule, "poi_id"):
+            continue
+        result.setdefault(rule.poi_id, []).append(
+            ItineraryItemPoiSnapshot.TicketRuleSnapshot(
+                audience_code=rule.audience_code,
+                audience_label=audience_label,
+                ticket_type=rule.ticket_type,
+                time_slot=rule.time_slot,
+                price=float(rule.price),
+                currency=rule.currency,
+                conditions=rule.conditions,
+            )
+        )
+    return result
 
 
 def _get_fork_source_meta_map(
@@ -210,6 +244,7 @@ def _build_snapshot_payload(db: Session, itinerary: Itinerary) -> dict[str, Any]
             "status": itinerary.status,
             "visibility": itinerary.visibility,
             "cover_image_url": itinerary.cover_image_url,
+            "start_date": itinerary.start_date.isoformat() if itinerary.start_date is not None else None,
         },
         "items": [_snapshot_item_dict(item, poi, poi_wkt) for item, poi, poi_wkt in rows],
     }
@@ -232,6 +267,27 @@ def _create_snapshot_for_itinerary(db: Session, itinerary: Itinerary) -> Itinera
     db.add(snapshot)
     db.flush()
     return snapshot
+
+
+def _notify_source_update(
+    db: Session,
+    *,
+    source_itinerary: Itinerary,
+    source_snapshot: ItinerarySnapshot,
+    changed_fields: set[str],
+    has_removed_items: bool,
+    has_modified_items: bool,
+) -> None:
+    notify_source_itinerary_updated(
+        db,
+        source_itinerary_id=source_itinerary.id,
+        source_snapshot_id=source_snapshot.id,
+        sender_user_id=source_itinerary.creator_user_id,
+        source_title=source_itinerary.title,
+        changed_fields=changed_fields,
+        has_removed_items=has_removed_items,
+        has_modified_items=has_modified_items,
+    )
 
 
 def _ensure_public_itinerary(db: Session, itinerary_id: UUID) -> tuple[Itinerary, str]:
@@ -276,7 +332,15 @@ def _latest_source_snapshot_id(db: Session, source_itinerary_id: UUID) -> UUID |
         .order_by(ItinerarySnapshot.version_no.desc())
         .limit(1)
     )
-    return db.scalars(stmt).first()
+    latest = db.scalars(stmt).first()
+    if isinstance(latest, UUID):
+        return latest
+    if isinstance(latest, str):
+        try:
+            return UUID(latest)
+        except ValueError:
+            return None
+    return None
 
 
 def _build_action_status_map(
@@ -294,9 +358,16 @@ def _build_action_status_map(
         )
         .order_by(ItineraryDiffAction.created_at.desc())
     )
-    rows = db.scalars(stmt).all()
+    rows_result = db.scalars(stmt)
+    if hasattr(rows_result, "all"):
+        rows = rows_result.all()
+    else:
+        first = rows_result.first() if hasattr(rows_result, "first") else None
+        rows = [first] if first is not None else []
     result: dict[str, str] = {}
     for row in rows:
+        if not hasattr(row, "diff_key") or not hasattr(row, "action"):
+            continue
         if row.diff_key in result:
             continue
         result[row.diff_key] = row.action
@@ -322,6 +393,25 @@ def _parse_start_time(value: Any) -> time | None:
     )
 
 
+def _parse_start_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid start_date in snapshot",
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid start_date in snapshot",
+    )
+
+
 def create_itinerary(db: Session, creator: User, payload: ItineraryCreate) -> ItineraryResponse:
     status_value = _ensure_status(payload.status)
     visibility_value = _ensure_visibility(payload.visibility)
@@ -333,6 +423,7 @@ def create_itinerary(db: Session, creator: User, payload: ItineraryCreate) -> It
         status=status_value,
         visibility=visibility_value,
         cover_image_url=payload.cover_image_url,
+        start_date=payload.start_date,
     )
     db.add(itinerary)
     db.commit()
@@ -431,6 +522,7 @@ def fork_public_itinerary(
         status="in_progress",
         visibility="private",
         cover_image_url=snapshot_meta.get("cover_image_url"),
+        start_date=_parse_start_date(snapshot_meta.get("start_date")),
     )
     db.add(new_itinerary)
     db.flush()
@@ -516,10 +608,15 @@ def get_itinerary_diff(db: Session, itinerary_id: UUID, creator: User) -> Itiner
         if item_diffs:
             modified_items.append(ItineraryDiffItemModified(key=key, fields=item_diffs))
 
+    latest_snapshot_id = _latest_source_snapshot_id(db, fork_rel.source_itinerary_id)
+    status_map = _build_action_status_map(db, itinerary.id, source_snapshot.id, creator.id)
+
     return ItineraryDiffResponse(
         source_snapshot_id=source_snapshot.id,
         source_itinerary_id=fork_rel.source_itinerary_id,
         forked_itinerary_id=itinerary.id,
+        latest_source_snapshot_id=latest_snapshot_id,
+        stale_warning=latest_snapshot_id is not None and latest_snapshot_id != source_snapshot.id,
         summary=ItineraryDiffSummary(
             added=len(added_items),
             removed=len(removed_items),
@@ -529,7 +626,128 @@ def get_itinerary_diff(db: Session, itinerary_id: UUID, creator: User) -> Itiner
         added_items=added_items,
         removed_items=removed_items,
         modified_items=modified_items,
+        action_statuses=status_map,
     )
+
+
+def submit_itinerary_diff_actions_batch(
+    db: Session,
+    itinerary_id: UUID,
+    creator: User,
+    payload: ItineraryDiffActionBatchRequest,
+) -> ItineraryDiffActionBatchResponse:
+    itinerary = db.get(Itinerary, itinerary_id)
+    if itinerary is None or itinerary.creator_user_id != creator.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+
+    fork_stmt = (
+        select(ItineraryFork)
+        .where(
+            ItineraryFork.forked_itinerary_id == itinerary_id,
+            ItineraryFork.forked_by_user_id == creator.id,
+        )
+        .limit(1)
+    )
+    fork_rel = db.scalars(fork_stmt).first()
+    if fork_rel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fork relation not found")
+
+    snapshot = db.get(ItinerarySnapshot, payload.source_snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
+
+    warnings: list[str] = []
+    latest_snapshot_id = _latest_source_snapshot_id(db, fork_rel.source_itinerary_id)
+    if latest_snapshot_id is not None and latest_snapshot_id != payload.source_snapshot_id:
+        warnings.append("Diff is stale: source itinerary has a newer snapshot")
+
+    counts = {"applied": 0, "rolled_back": 0, "ignored": 0, "read": 0}
+    for item in payload.actions:
+        if item.action not in _DIFF_ACTIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid diff action",
+            )
+        reason = item.reason.strip() if item.reason else None
+        if item.action == "ignored" and not reason:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ignore action requires reason",
+            )
+        db.add(
+            ItineraryDiffAction(
+                itinerary_id=itinerary.id,
+                source_snapshot_id=payload.source_snapshot_id,
+                diff_key=item.diff_key,
+                diff_type=item.diff_type,
+                action=item.action,
+                reason=reason,
+                actor_user_id=creator.id,
+            )
+        )
+        counts[item.action] += 1
+    db.commit()
+
+    status_map = _build_action_status_map(db, itinerary.id, payload.source_snapshot_id, creator.id)
+    return ItineraryDiffActionBatchResponse(
+        applied_count=counts["applied"],
+        rolled_back_count=counts["rolled_back"],
+        ignored_count=counts["ignored"],
+        read_count=counts["read"],
+        warnings=warnings,
+        action_statuses=status_map,
+    )
+
+
+def get_itinerary_diff_action_statuses(
+    db: Session,
+    itinerary_id: UUID,
+    creator: User,
+    source_snapshot_id: UUID,
+) -> ItineraryDiffActionStatusResponse:
+    itinerary = db.get(Itinerary, itinerary_id)
+    if itinerary is None or itinerary.creator_user_id != creator.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+
+    fork_stmt = (
+        select(ItineraryFork)
+        .where(
+            ItineraryFork.forked_itinerary_id == itinerary_id,
+            ItineraryFork.forked_by_user_id == creator.id,
+        )
+        .limit(1)
+    )
+    fork_rel = db.scalars(fork_stmt).first()
+    if fork_rel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fork relation not found")
+
+    stmt = (
+        select(ItineraryDiffAction)
+        .where(
+            ItineraryDiffAction.itinerary_id == itinerary_id,
+            ItineraryDiffAction.source_snapshot_id == source_snapshot_id,
+            ItineraryDiffAction.actor_user_id == creator.id,
+        )
+        .order_by(ItineraryDiffAction.created_at.desc())
+    )
+    rows = db.scalars(stmt).all()
+    latest_by_key: dict[str, ItineraryDiffAction] = {}
+    for row in rows:
+        if row.diff_key in latest_by_key:
+            continue
+        latest_by_key[row.diff_key] = row
+    items = [
+        ItineraryDiffActionStatusItem(
+            diff_key=row.diff_key,
+            diff_type=row.diff_type,
+            action=row.action,
+            reason=row.reason,
+            actor_user_id=row.actor_user_id,
+            created_at=row.created_at,
+        )
+        for row in latest_by_key.values()
+    ]
+    return ItineraryDiffActionStatusResponse(source_snapshot_id=source_snapshot_id, items=items)
 
 
 def list_items_with_poi(
@@ -547,6 +765,7 @@ def list_items_with_poi(
     )
     rows = db.execute(stmt).all()
 
+    rules_map = _rules_for_poi_ids(db, [poi.id for _, poi, _ in rows])
     items = []
     for item, poi, poi_wkt in rows:
         longitude, latitude = _parse_point_text(poi_wkt)
@@ -569,6 +788,7 @@ def list_items_with_poi(
                     address=poi.address,
                     opening_hours=poi.opening_hours,
                     ticket_price=float(poi.ticket_price) if poi.ticket_price is not None else None,
+                    ticket_rules=rules_map.get(poi.id, []),
                 ),
             )
         )
@@ -589,6 +809,7 @@ def list_public_items_with_poi(
     )
     rows = db.execute(stmt).all()
 
+    rules_map = _rules_for_poi_ids(db, [poi.id for _, poi, _ in rows])
     items = []
     for item, poi, poi_wkt in rows:
         longitude, latitude = _parse_point_text(poi_wkt)
@@ -611,6 +832,7 @@ def list_public_items_with_poi(
                     address=poi.address,
                     opening_hours=poi.opening_hours,
                     ticket_price=float(poi.ticket_price) if poi.ticket_price is not None else None,
+                    ticket_rules=rules_map.get(poi.id, []),
                 ),
             )
         )
@@ -651,10 +873,20 @@ def update_itinerary(
                     "days",
                     "visibility",
                     "cover_image_url",
+                    "start_date",
                 )
             )
     if should_snapshot:
-        _create_snapshot_for_itinerary(db, row)
+        snapshot = _create_snapshot_for_itinerary(db, row)
+        changed_fields = {field for field in data.keys() if field in _META_DIFF_FIELDS}
+        _notify_source_update(
+            db,
+            source_itinerary=row,
+            source_snapshot=snapshot,
+            changed_fields=changed_fields,
+            has_removed_items=False,
+            has_modified_items=False,
+        )
         db.commit()
 
     meta_map = _get_fork_source_meta_map(db, [row.id])
@@ -709,7 +941,15 @@ def create_item(
             detail="Duplicate day_index and sort_order",
         ) from exc
     if should_snapshot:
-        _create_snapshot_for_itinerary(db, itinerary)
+        snapshot = _create_snapshot_for_itinerary(db, itinerary)
+        _notify_source_update(
+            db,
+            source_itinerary=itinerary,
+            source_snapshot=snapshot,
+            changed_fields=set(),
+            has_removed_items=False,
+            has_modified_items=False,
+        )
         db.commit()
     db.refresh(item)
     return _item_to_response(item)
@@ -750,7 +990,15 @@ def update_item(
             detail="Duplicate day_index and sort_order",
         ) from exc
     if itinerary.status == "published":
-        _create_snapshot_for_itinerary(db, itinerary)
+        snapshot = _create_snapshot_for_itinerary(db, itinerary)
+        _notify_source_update(
+            db,
+            source_itinerary=itinerary,
+            source_snapshot=snapshot,
+            changed_fields=set(),
+            has_removed_items=False,
+            has_modified_items=True,
+        )
         db.commit()
     db.refresh(item)
     return _item_to_response(item)
@@ -768,5 +1016,13 @@ def delete_item(db: Session, itinerary_id: UUID, item_id: UUID, creator: User) -
     db.delete(item)
     db.commit()
     if itinerary.status == "published":
-        _create_snapshot_for_itinerary(db, itinerary)
+        snapshot = _create_snapshot_for_itinerary(db, itinerary)
+        _notify_source_update(
+            db,
+            source_itinerary=itinerary,
+            source_snapshot=snapshot,
+            changed_fields=set(),
+            has_removed_items=True,
+            has_modified_items=False,
+        )
         db.commit()

@@ -21,6 +21,7 @@ export type ItineraryResponse = {
   status: string;
   visibility: string;
   cover_image_url: string | null;
+  start_date: string | null;
   fork_source_itinerary_id: string | null;
   fork_source_author_nickname: string | null;
   fork_source_title: string | null;
@@ -60,6 +61,8 @@ export type ItineraryDiffResponse = {
   source_snapshot_id: string;
   source_itinerary_id: string;
   forked_itinerary_id: string;
+  latest_source_snapshot_id: string | null;
+  stale_warning: boolean;
   summary: {
     added: number;
     removed: number;
@@ -77,6 +80,38 @@ export type ItineraryDiffResponse = {
   modified_items: Array<{
     key: string;
     fields: ItineraryFieldDiff[];
+  }>;
+  action_statuses: Record<string, string>;
+};
+
+export type ItineraryDiffActionType = "metadata" | "added" | "removed" | "modified";
+export type ItineraryDiffActionName = "applied" | "rolled_back" | "ignored" | "read";
+
+export type ItineraryDiffActionInput = {
+  diff_key: string;
+  diff_type: ItineraryDiffActionType;
+  action: ItineraryDiffActionName;
+  reason?: string | null;
+};
+
+export type ItineraryDiffActionBatchResponse = {
+  applied_count: number;
+  rolled_back_count: number;
+  ignored_count: number;
+  read_count: number;
+  warnings: string[];
+  action_statuses: Record<string, string>;
+};
+
+export type ItineraryDiffActionStatusResponse = {
+  source_snapshot_id: string;
+  items: Array<{
+    diff_key: string;
+    diff_type: string;
+    action: string;
+    reason: string | null;
+    actor_user_id: string;
+    created_at: string;
   }>;
 };
 
@@ -103,9 +138,131 @@ export type PoiResponse = {
   address: string | null;
   opening_hours: string | null;
   ticket_price: number | null;
+  ticket_rules: PoiTicketRuleItem[];
   parent_poi_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type PricingAudienceItem = {
+  code: string;
+  label: string;
+  sort_order: number;
+};
+
+export type PricingAudienceListResponse = {
+  items: PricingAudienceItem[];
+};
+
+export type PoiTicketRuleItem = {
+  id: string;
+  audience_code: string;
+  audience_label: string;
+  ticket_type: string;
+  time_slot: string;
+  price: number;
+  currency: string;
+  conditions: string | null;
+  is_active: boolean;
+};
+
+export type PoiTicketRuleUpsert = {
+  id?: string;
+  audience_code: string;
+  ticket_type: string;
+  time_slot: string;
+  price: number;
+  currency: string;
+  conditions?: string | null;
+  is_active?: boolean;
+};
+
+export type PoiTicketRuleListResponse = {
+  items: PoiTicketRuleItem[];
+};
+
+export type PoiCorrectionType = {
+  id: string;
+  code: string;
+  label: string;
+  target_field: string;
+  value_kind: string;
+  placeholder: string | null;
+  input_mode: "ticket_rules" | "time_range" | "text";
+  input_schema: Record<string, unknown> | null;
+  help_text: string | null;
+  sort_order: number;
+};
+
+export type PoiCorrectionTypeListResponse = {
+  items: PoiCorrectionType[];
+};
+
+export type PoiCorrectionResponse = {
+  id: string;
+  poi_id: string;
+  source_poi_name_snapshot: string | null;
+  source_itinerary_id: string | null;
+  source_itinerary_title_snapshot: string | null;
+  source_itinerary_author_snapshot: string | null;
+  type_code: string;
+  type_label: string;
+  target_field: string;
+  value_kind: string;
+  proposed_value: string | null;
+  details: string | null;
+  photo_url: string | null;
+  status: "pending" | "accepted" | "rejected";
+  submitter_user_id: string;
+  reviewer_user_id: string | null;
+  review_comment: string | null;
+  created_at: string;
+  updated_at: string;
+  reviewed_at: string | null;
+};
+
+export type PoiCorrectionListResponse = {
+  items: PoiCorrectionResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type PoiCorrectionReviewResponse = {
+  correction: PoiCorrectionResponse;
+  poi_updated: boolean;
+};
+
+export type UserNotificationResponse = {
+  id: string;
+  recipient_user_id: string;
+  sender_user_id: string | null;
+  event_type: "source_itinerary_updated" | "correction_accepted";
+  severity: "critical" | "warning" | "info";
+  title: string;
+  content: string;
+  is_read: boolean;
+  read_at: string | null;
+  source_itinerary_id: string | null;
+  forked_itinerary_id: string | null;
+  source_snapshot_id: string | null;
+  correction_id: string | null;
+  poi_id: string | null;
+  extra_payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserNotificationListResponse = {
+  items: UserNotificationResponse[];
+  total: number;
+  unread_count: number;
+  offset: number;
+  limit: number;
+};
+
+export type MarkAllNotificationsReadResponse = {
+  updated_count: number;
 };
 
 
@@ -125,6 +282,7 @@ export type ItineraryItemPoiSnapshot = {
   address: string | null;
   opening_hours: string | null;
   ticket_price: number | null;
+  ticket_rules: PoiTicketRuleItem[];
 };
 
 export type ItineraryItemWithPoi = {
@@ -172,6 +330,22 @@ export type ItineraryUpdatePayload = {
   status?: "draft" | "in_progress" | "published";
   visibility?: "private" | "public" | "followers";
   cover_image_url?: string | null;
+  start_date?: string | null;
+};
+
+export type ItineraryWeatherDayResponse = {
+  day_index: number;
+  date: string;
+  text: string;
+  icon: string;
+  temp_min: number | null;
+  temp_max: number | null;
+};
+
+export type ItineraryWeatherResponse = {
+  itinerary_id: string;
+  start_date: string;
+  items: ItineraryWeatherDayResponse[];
 };
 
 export type ItineraryItemsWithPoiListResponse = {
@@ -358,6 +532,145 @@ export async function fetchPois(token: string | undefined, offset = 0, limit = 1
   return parseJsonResponse<PoiListResponse>(response, "List scenic spots request");
 }
 
+export async function fetchPricingAudiences(): Promise<PricingAudienceListResponse> {
+  const response = await fetch(`${API_BASE_URL}/pois/pricing/audiences`);
+  return parseJsonResponse<PricingAudienceListResponse>(response, "List pricing audiences request");
+}
+
+export async function fetchPoiTicketRules(poiId: string): Promise<PoiTicketRuleListResponse> {
+  const response = await fetch(`${API_BASE_URL}/pois/${poiId}/ticket-rules`);
+  return parseJsonResponse<PoiTicketRuleListResponse>(response, "List POI ticket rules request");
+}
+
+export async function upsertPoiTicketRules(
+  poiId: string,
+  payload: { items: PoiTicketRuleUpsert[] }
+): Promise<PoiTicketRuleListResponse> {
+  const response = await fetch(`${API_BASE_URL}/pois/${poiId}/ticket-rules`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<PoiTicketRuleListResponse>(response, "Upsert POI ticket rules request");
+}
+
+export async function fetchPoiCorrectionTypes(): Promise<PoiCorrectionTypeListResponse> {
+  const response = await fetch(`${API_BASE_URL}/corrections/types`);
+  return parseJsonResponse<PoiCorrectionTypeListResponse>(response, "List correction types request");
+}
+
+export async function submitPoiCorrection(
+  poiId: string,
+  token: string,
+  payload: {
+    type_code: string;
+    proposed_value?: string | null;
+    details?: string | null;
+    photo?: File | null;
+    source_itinerary_id?: string | null;
+  }
+): Promise<PoiCorrectionResponse> {
+  const form = new FormData();
+  form.set("type_code", payload.type_code);
+  if (payload.proposed_value !== undefined && payload.proposed_value !== null) {
+    form.set("proposed_value", payload.proposed_value);
+  }
+  if (payload.details !== undefined && payload.details !== null) {
+    form.set("details", payload.details);
+  }
+  if (payload.source_itinerary_id) {
+    form.set("source_itinerary_id", payload.source_itinerary_id);
+  }
+  if (payload.photo) {
+    form.set("photo", payload.photo);
+  }
+  const response = await fetch(`${API_BASE_URL}/corrections/pois/${poiId}`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: form
+  });
+  return parseJsonResponse<PoiCorrectionResponse>(response, "Submit POI correction request");
+}
+
+export async function fetchMyCorrections(
+  token: string,
+  offset = 0,
+  limit = 20
+): Promise<PoiCorrectionListResponse> {
+  const response = await fetch(`${API_BASE_URL}/corrections/mine?offset=${offset}&limit=${limit}`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<PoiCorrectionListResponse>(response, "List my corrections request");
+}
+
+export async function fetchReviewCorrections(
+  token: string,
+  offset = 0,
+  limit = 20
+): Promise<PoiCorrectionListResponse> {
+  const response = await fetch(`${API_BASE_URL}/corrections/review?offset=${offset}&limit=${limit}`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<PoiCorrectionListResponse>(response, "List review corrections request");
+}
+
+export async function reviewPoiCorrection(
+  correctionId: string,
+  token: string,
+  payload: { action: "accepted" | "rejected"; review_comment?: string | null }
+): Promise<PoiCorrectionReviewResponse> {
+  const response = await fetch(`${API_BASE_URL}/corrections/${correctionId}/review`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<PoiCorrectionReviewResponse>(response, "Review POI correction request");
+}
+
+export async function fetchNotifications(
+  token: string,
+  offset = 0,
+  limit = 20,
+  unreadOnly = false
+): Promise<UserNotificationListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/notifications?offset=${offset}&limit=${limit}&unread_only=${unreadOnly ? "true" : "false"}`,
+    {
+      headers: authHeaders(token)
+    }
+  );
+  return parseJsonResponse<UserNotificationListResponse>(response, "List notifications request");
+}
+
+export async function markNotificationRead(
+  notificationId: string,
+  token: string,
+  read = true
+): Promise<UserNotificationResponse> {
+  const response = await fetch(`${API_BASE_URL}/notifications/${notificationId}/read`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ read })
+  });
+  return parseJsonResponse<UserNotificationResponse>(response, "Mark notification read request");
+}
+
+export async function markAllNotificationsRead(token: string): Promise<MarkAllNotificationsReadResponse> {
+  const response = await fetch(`${API_BASE_URL}/notifications/read-all`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<MarkAllNotificationsReadResponse>(response, "Mark all notifications read request");
+}
+
 export async function fetchItineraryItemsWithPoi(
   itineraryId: string,
   token: string
@@ -366,6 +679,18 @@ export async function fetchItineraryItemsWithPoi(
     headers: authHeaders(token)
   });
   return parseJsonResponse<ItineraryItemsWithPoiListResponse>(response, "List itinerary items request");
+}
+
+export async function fetchItineraryWeather(
+  itineraryId: string,
+  token: string,
+  forceRefresh = false
+): Promise<ItineraryWeatherResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/itineraries/${itineraryId}/weather?force_refresh=${forceRefresh ? "true" : "false"}`,
+    { headers: authHeaders(token) }
+  );
+  return parseJsonResponse<ItineraryWeatherResponse>(response, "Fetch itinerary weather request");
 }
 
 export async function fetchPublicItineraries(offset = 0, limit = 20): Promise<PublicItineraryListResponse> {
@@ -398,6 +723,41 @@ export async function fetchItineraryDiff(itineraryId: string, token: string): Pr
     headers: authHeaders(token)
   });
   return parseJsonResponse<ItineraryDiffResponse>(response, "Fetch itinerary diff request");
+}
+
+export async function submitItineraryDiffActionsBatch(
+  itineraryId: string,
+  sourceSnapshotId: string,
+  actions: ItineraryDiffActionInput[],
+  token: string
+): Promise<ItineraryDiffActionBatchResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/diff/actions:batch`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      source_snapshot_id: sourceSnapshotId,
+      actions
+    })
+  });
+  return parseJsonResponse<ItineraryDiffActionBatchResponse>(response, "Submit itinerary diff actions request");
+}
+
+export async function fetchItineraryDiffActionStatuses(
+  itineraryId: string,
+  sourceSnapshotId: string,
+  token: string
+): Promise<ItineraryDiffActionStatusResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/itineraries/${itineraryId}/diff/actions?source_snapshot_id=${sourceSnapshotId}`,
+    { headers: authHeaders(token) }
+  );
+  return parseJsonResponse<ItineraryDiffActionStatusResponse>(
+    response,
+    "Fetch itinerary diff action statuses request"
+  );
 }
 
 export async function createItineraryItem(

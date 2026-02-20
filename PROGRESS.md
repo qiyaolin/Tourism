@@ -4,7 +4,7 @@
 
 - project: `Project Atlas`
 - last_session_summary: `用户已确认第 1、2 步运行态验收成功，并指示将 Phase 1.9 暂时标记为完成。`
-- current_focus: `Web 端优先：已完成 1.7-002 与 2.1 运行态验收，推进后续阶段任务`
+- current_focus: `Web 端优先：Phase 2.5（天气集成 P1）已收口，进入下一阶段需求评审与任务拆分`
 - global_blockers: `无`
 - next_session_bootstrap:
   - `读取本文件并输出：当前阶段/当前任务/阻塞项/下一步动作`
@@ -27,7 +27,7 @@
 | P1-1.9-001 | Phase 1.9 | Web 端验收：端到端流程（注册→AI生成→编辑→发布→浏览） | done | codex | 2026-02-18T22:14:28-05:00 | `PROGRESS.md` | 用户手动验收通过（Web 端主链路可用）；移动端项按 Web-only 规则暂缓；按用户指令暂时将 1.9 标记为完成 | 无 | 后续如恢复安全专项，可追加独立安全验收任务 |
 | P2-2.1-001 | Phase 2.1 | 一键借鉴（Fork）系统 P0（发布快照复制） | done | codex | 2026-02-18T22:14:28-05:00 | `backend/app/models/itinerary_fork.py`, `backend/app/models/itinerary_snapshot.py`, `backend/app/models/__init__.py`, `backend/app/services/itinerary_service.py`, `backend/app/api/v1/explore.py`, `backend/app/api/v1/itineraries.py`, `backend/app/schemas/itinerary.py`, `backend/alembic/versions/20260218_0004_fork_and_snapshot.py`, `backend/tests/test_fork_and_diff_service.py`, `frontend/src/api.ts`, `frontend/src/pages/PublicItineraryPage.vue`, `frontend/src/pages/LoginPage.vue`, `frontend/src/router.ts`, `frontend/src/pages/MyItinerariesPage.vue`, `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `uv run ruff check app/services/itinerary_service.py app/api/v1/explore.py app/api/v1/itineraries.py tests/test_fork_and_diff_service.py alembic/versions/20260218_0004_fork_and_snapshot.py`=passed；`uv run pytest -q`=17 passed；`pnpm lint`=passed；`pnpm build`=passed；用户已确认借鉴链路运行态通过（公开页借鉴->登录回跳->编辑器副本） | 无 | 维持能力稳定，按需推进 2.2/后续功能 |
 | P2-2.2-001 | Phase 2.2 | 版本快照与最小 Diff API 预埋（字段级差异） | done | codex | 2026-02-19T00:56:35-05:00 | `backend/app/services/itinerary_service.py`, `backend/app/schemas/itinerary.py`, `backend/app/api/v1/itineraries.py`, `backend/alembic/versions/20260218_0004_fork_and_snapshot.py`, `backend/tests/test_fork_and_diff_service.py`, `frontend/src/api.ts`, `PROGRESS.md` | 运行态联调完成：正向 `summary.added=1/modified=1`，`metadata_fields` 命中 `title/status/visibility`，`added_keys` 命中 `d2-s1`，`modified_keys` 命中 `d1-s1`；负向非 fork 行程请求 diff 返回 404；`uv run pytest -q tests/test_fork_and_diff_service.py`=2 passed | 无 | 进入 Diff View UI 收尾与用户复测 |
-| P2-2.2-002 | Phase 2.2 | 编辑器内 Diff View UI（字段级高亮） | test_passed | codex | 2026-02-19T01:32:01-05:00 | `frontend/src/components/ItineraryDiffPanel.vue`, `frontend/src/pages/EditorWorkbenchPage.vue`, `frontend/src/styles.css`, `PROGRESS.md` | `pnpm lint`=passed；`pnpm build`=passed；完成“行程元信息”可读性修复：字段中文映射（标题/目的地/天数/状态/可见范围/封面）、状态与可见性值中文化、空值统一“未设置”、未知字段兜底“其他信息（字段名）” | 待用户关闭旧标签页后重开并手工复测 UI 交互 | 用户复测“行程元信息”前后值是否可读、枚举与空值文案是否符合预期 |
+| P2-2.2-002 | Phase 2.2 | 编辑器内 Diff View UI（字段级高亮） | done | codex | 2026-02-19T03:20:00-05:00 | `frontend/src/components/ItineraryDiffPanel.vue`, `frontend/src/pages/EditorWorkbenchPage.vue`, `frontend/src/styles.css`, `PROGRESS.md` | 用户已完成运行态验收并确认三层能力可正常工作；版本一致性核验通过（本地源码/容器源码/在线产物命中最新特征）；`pnpm lint`（0 error, warnings only）与 `pnpm build` 均通过 | 无 | 进入下一 Phase 需求评审与任务拆分 |
 | P1-1.7-002 | Phase 1.7 | 我的行程/编辑器补充作废与取消按钮 | done | codex | 2026-02-18T22:14:28-05:00 | `frontend/src/api.ts`, `frontend/src/components/ConfirmDialog.vue`, `frontend/src/pages/MyItinerariesPage.vue`, `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `pnpm lint`=passed；`pnpm build`=passed；确认动作改为站内 UI 对话框（不再使用 `window.confirm`）；在线核验：`http://localhost:5173/src/pages/MyItinerariesPage.vue` 与 `http://localhost:5173/src/pages/EditorWorkbenchPage.vue` 均命中 `ConfirmDialog` 特征；用户确认第 1 步运行态验收成功 | 无 | 进入后续阶段开发 |
 | GOV-WEB-ONLY-001 | Governance | 开发范围锁定为 Web 端（移动端暂缓） | done | codex | 2026-02-18T14:46:58-05:00 | `PROGRESS.md`, `Project_Atlas_开发手册_Checklist.md`, `Project_Atlas_开发规划书_V2.0.md` | 用户明确确认“现阶段只专注 Web 端开发，暂不考虑移动端”；三份文档已同步更新范围口径 | 无 | 后续需求评审与任务拆分默认仅包含 Web 端 |
 | DOC-TRACK-001 | Governance | 跨 session 进度追踪机制落地 | done | codex | 2026-02-18T00:00:00+08:00 | `AGENTS.md`, `PROGRESS.md`, `README.md` | 文档结构与规则字段已落地 | 无 | 后续按规则持续更新 |
@@ -35,6 +35,11 @@
 | GOV-PHASE-SYNC-001 | Governance | Phase 收尾“更新到最新版”规则落地 | done | codex | 2026-02-18T21:10:44-05:00 | `AGENTS.md`, `PROGRESS.md` | 版本一致性复核通过：`docker exec atlas-frontend /app/src/pages/PublicItineraryPage.vue` 含 Fork 特征；`http://localhost:5173/src/pages/PublicItineraryPage.vue` 含 `forkPublicItinerary` 与 `以此为模板`；`http://localhost:5173/src/pages/LoginPage.vue` 含 `fork_source/auto_fork` 回跳逻辑 | 无 | 后续每个 Phase 进入 done 前强制执行最新版同步核验 |
 
 ## Changelog (Newest First)
+
+- 2026-02-19T03:20:00-05:00
+  - 变更：用户完成最终验收，确认 Diff 三层改造（信息架构、关键改动、动作闭环）均可正常工作。
+  - 结论：`P2-2.2-002` 状态更新为 `done`，Phase 2.2 可收口并进入下一 Phase。
+  - 风险：当前无 P0 阻塞。
 
 - 2026-02-19T01:32:01-05:00
   - 变更：修复 Diff 面板“行程元信息”可读性问题，重写 `ItineraryDiffPanel` 的元信息展示逻辑，新增字段中文映射、状态/可见性枚举中文化、空值统一文案与未知字段兜底显示。
@@ -277,3 +282,114 @@
   - 变更：新增跨 session 进度追踪规则，建立 `PROGRESS.md` 单一进度源。
   - 结论：后续 session 可直接恢复上下文并持续追踪状态流转。
   - 风险：时间戳与任务状态若不及时更新，将导致恢复精度下降。
+
+## Session Update (2026-02-19)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.3-001 | Phase 2.3 | 便捷纠错系统 P0（纠错类型/提交API/图片上传EXIF剥离/我的纠错） | test_passed | codex | 2026-02-19T11:40:00-05:00 | `backend/app/models/poi_correction*.py`, `backend/app/schemas/poi_correction.py`, `backend/app/services/poi_correction_service.py`, `backend/app/services/storage/*`, `backend/app/api/v1/poi_corrections.py`, `backend/alembic/versions/20260219_0006_create_poi_correction_tables.py`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/.env.example`, `backend/pyproject.toml`, `backend/uv.lock`, `frontend/src/components/PoiCorrectionPanel.vue`, `frontend/src/components/PoiInfoCard.vue`, `frontend/src/api.ts`, `frontend/src/pages/MyCorrectionsPage.vue`, `frontend/src/router.ts`, `frontend/src/App.vue`, `frontend/src/styles.css` | `uv run ruff check app/api/v1/poi_corrections.py app/main.py app/models/__init__.py app/models/poi_correction.py app/models/poi_correction_notification.py app/models/poi_correction_type.py app/services/poi_correction_service.py tests/test_poi_correction_service.py`=passed；`uv run pytest -q tests/test_poi_correction_service.py`=2 passed；`pnpm lint`=passed(175 warnings, 0 errors)；`pnpm build`=passed | 无 | 进入 P2-2.3-002 收尾验证与业务回归联调 |
+| P2-2.3-002 | Phase 2.3 | 便捷纠错系统 P1部分（审核台/采纳后自动更新POI/审核队列） | test_passed | codex | 2026-02-19T11:40:00-05:00 | `backend/app/services/poi_correction_service.py`, `backend/app/api/v1/poi_corrections.py`, `backend/tests/test_poi_correction_service.py`, `frontend/src/pages/CorrectionReviewPage.vue`, `frontend/src/router.ts`, `frontend/src/App.vue` | `uv run pytest -q tests/test_poi_correction_service.py`=2 passed（含采纳后自动更新POI）；`pnpm build`=passed | POI 当前无强归属字段，审核归属采用“关联行程推导 reviewer_user_id，无归属时进入公开审核池”策略 | 下一步执行端到端人工回归：提交纠错->审核采纳->POI页面刷新验证 |
+
+### Changelog Addendum
+
+- 2026-02-19T11:40:00-05:00
+  - 变更：落地 Phase 2.3 P0 + P1部分，新增 POI 纠错模型、审核流程、图片上传与 EXIF 剥离、前端纠错面板/我的纠错/审核台。
+  - 结论：后端与前端门禁通过，任务状态更新为 `test_passed`。
+  - 风险：尚未完成浏览器端到端人工联调（真实用户链路）；POI 归属模型当前为推导策略，后续可升级为显式归属。
+
+## Session Update (2026-02-19 Ticket Rules Hardening)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.3-003 | Phase 2.3 | 票价规则结构化纠错与我的纠错上下文完善 | test_passed | codex | 2026-02-19T16:55:00-05:00 | `backend/app/api/v1/pois.py`, `backend/app/services/poi_service.py`, `backend/app/services/itinerary_service.py`, `backend/app/services/poi_correction_service.py`, `backend/app/schemas/poi.py`, `backend/app/schemas/poi_correction.py`, `backend/alembic/versions/20260219_0006_create_poi_correction_tables.py`, `backend/alembic/versions/20260219_0007_ticket_rules_and_correction_context.py`, `backend/tests/test_poi_correction_service.py`, `frontend/src/api.ts`, `frontend/src/components/PoiCorrectionPanel.vue`, `frontend/src/components/PoiInfoCard.vue`, `frontend/src/pages/MyCorrectionsPage.vue`, `frontend/src/pages/EditorWorkbenchPage.vue` | `uv run ruff check --ignore E501 ...`=passed(本次改动相关文件); `uv run pytest -q tests/test_poi_correction_service.py tests/test_itinerary_items_with_poi.py`=5 passed; `pnpm lint`=passed(0 error, warnings only); `pnpm build`=passed; `docker compose -f infra/docker-compose.yml restart backend frontend`=done; `alembic current`=20260219_0007(head); 在线产物命中：`http://localhost:5173/src/components/PoiCorrectionPanel.vue` 含 `sourceItineraryId/fetchPricingAudiences`，`http://localhost:5173/src/pages/MyCorrectionsPage.vue` 含 `source_itinerary_title_snapshot` 展示逻辑 | 无 | 请用户关闭旧标签页后重新打开页面，验证“票价规则纠错 + 我的纠错来源模板显示” |
+- 2026-02-19T17:25:00-05:00
+  - 变更：根据用户反馈恢复“多类型纠错”交互，不再仅限票价；保留票价纠错的结构化规则输入（人群/票种/时段/条件/价格）。后端恢复多类型 `list_correction_types` 与提交校验逻辑；审核采纳时对 `ticket_price` 走规则写回，对 `opening_hours/address` 走普通字段写回；新增迁移 `20260219_0008` 重新激活非票价纠错类型。
+  - 结论：`/api/v1/corrections/types` 现返回 5 类纠错；在线前端产物命中 `isTicketPriceType/proposedValue`，已支持“票价规则编辑 + 非票价普通输入”双模式。
+  - 风险：接口返回中文在终端中仍可能显示乱码（编码链路），以浏览器实际渲染为准。
+- 2026-02-19T18:05:00-05:00
+  - 变更：纠错表单按类型约束输入格式；`opening_hours_changed` 改为时间段输入（开始/结束 time），提交值统一为 `HH:MM-HH:MM`。后端新增同格式校验与时段先后校验，确保审核采纳后可直接应用。
+  - 结论：前端在线产物命中 `openingStart/isOpeningHoursType` 特征；后端容器源码命中 `_OPENING_HOURS_PATTERN` 与格式错误提示。
+  - 验证：`uv run ruff check --ignore E501 app/services/poi_correction_service.py tests/test_poi_correction_service.py` 通过；`uv run pytest -q tests/test_poi_correction_service.py`=4 passed；`pnpm build` 通过；前后端容器已重建并重启。
+
+## Session Update (2026-02-20 Correction UX Professionalization)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.3-004 | Phase 2.3 | 纠错类型专业命名 + 票价变动表单重构（分区卡片+规则表格） | done | codex | 2026-02-20T10:40:00-05:00 | `backend/app/models/poi_correction_type.py`, `backend/app/schemas/poi_correction.py`, `backend/app/services/poi_correction_service.py`, `backend/alembic/versions/20260220_0009_professionalize_correction_types.py`, `frontend/src/api.ts`, `frontend/src/components/PoiCorrectionPanel.vue`, `frontend/src/styles.css`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/models/poi_correction_type.py backend/app/schemas/poi_correction.py backend/app/services/poi_correction_service.py backend/tests/test_poi_correction_service.py backend/alembic/versions/20260220_0009_professionalize_correction_types.py`=passed；`uv run --project backend pytest -q backend/tests/test_poi_correction_service.py`=4 passed；`pnpm --dir frontend build`=passed；`docker compose -f infra/docker-compose.yml up -d --build backend frontend`=done；`alembic current`=`20260220_0009(head)`；DB 核验 `poi_correction_types` 命中 `票价变动/营业时间调整/地址纠偏/临时闭园通知/其他信息纠错` + `input_mode`；在线产物 `http://localhost:5173/src/components/PoiCorrectionPanel.vue` 命中 `ticket-rules-table`、`input_mode`、`提交票价变动纠错` | 无 | 进入下一阶段需求评审与任务拆分 |
+
+### Changelog Addendum
+
+- 2026-02-20T10:40:00-05:00
+  - 变更：纠错类型返回新增 `input_mode/input_schema/help_text`，前端改为按元数据渲染；票价变动表单重构为“规则表格”并增加行级校验提示；纠错类型文案统一升级为专业术语。
+  - 结论：已完成类型命名专业化与票价变动界面结构化，审核可直接应用的数据格式约束继续生效。
+  - 风险：PowerShell 控制台中文显示可能受本地代码页影响，以前端页面实际渲染为准。
+
+- 2026-02-20T10:55:00-05:00
+  - 变更：用户确认“纠错类型专业化 + 票价变动表单重构”运行态验收通过，将 `P2-2.3-004` 状态由 `test_passed` 更新为 `done`。
+  - 结论：Phase 2.3 当前新增能力完成收口，可进入下一阶段需求评审与任务拆分。
+  - 风险：无新增 P0 阻塞。
+
+## Session Update (2026-02-20 Phase 2.4 Signal System)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.4-001 | Phase 2.4 | 动态预警系统 P1（源更新 + 纠错采纳 + 通知中心） | done | codex | 2026-02-20T15:28:00-05:00 | `backend/app/models/user_notification.py`, `backend/app/schemas/notification.py`, `backend/app/services/notification_service.py`, `backend/app/api/v1/notifications.py`, `backend/app/api/v1/router.py`, `backend/app/services/itinerary_service.py`, `backend/app/services/poi_correction_service.py`, `backend/alembic/env.py`, `backend/alembic/versions/20260220_0010_create_user_notifications.py`, `backend/app/models/__init__.py`, `backend/tests/test_notification_service.py`, `backend/scripts/verify_notifications_e2e.py`, `frontend/src/api.ts`, `frontend/src/App.vue`, `frontend/src/router.ts`, `frontend/src/pages/ExplorePage.vue`, `frontend/src/pages/NotificationsPage.vue`, `frontend/src/styles.css`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/models/user_notification.py backend/app/schemas/notification.py backend/app/services/notification_service.py backend/app/api/v1/notifications.py backend/app/services/itinerary_service.py backend/app/services/poi_correction_service.py backend/tests/test_notification_service.py backend/alembic/versions/20260220_0010_create_user_notifications.py backend/scripts/verify_notifications_e2e.py`=passed；`uv run --project backend pytest -q backend/tests/test_notification_service.py backend/tests/test_fork_and_diff_service.py backend/tests/test_poi_correction_service.py`=8 passed；`uv run --project backend python backend/scripts/verify_notifications_e2e.py`=PASS；`uv run alembic current`=`20260220_0010(head)`；`docker compose -f infra/docker-compose.yml ps` 显示 backend/frontend up；容器源码核验：`docker exec atlas-frontend grep` 命中 `动态预警/预警中心/仅看未读/markAllNotificationsRead`；在线产物核验：`http://localhost:5173/src/pages/NotificationsPage.vue` 命中 `markAllNotificationsRead` 与中文文案特征；用户最终人工验收通过（关闭旧标签页后重新打开页面复测） | 无 | Phase 2.4 收口完成，进入下一阶段需求评审与任务拆分 |
+
+### Changelog Addendum
+
+- 2026-02-20T14:05:00-05:00
+  - 变更：落地 Phase 2.4 P1 动态预警系统，新增 `user_notifications` 数据模型与通知 API，接入两类触发源（源行程更新、纠错采纳）；前端新增通知中心页面，并在顶部导航与探索页增加入口与未读数展示。
+  - 结论：静态检查、后端测试、前端构建均通过，任务进入 `test_passed`。
+  - 风险：尚未完成运行态联调与线上产物特征核验；完成前不可标记 `done`。
+
+- 2026-02-20T14:32:00-05:00
+  - 变更：修复 Phase 2.4 新增界面与通知文案被英文化的问题，将 `frontend/src/App.vue`、`frontend/src/pages/ExplorePage.vue`、`frontend/src/pages/NotificationsPage.vue` 与 `backend/app/services/notification_service.py` 的用户可见文案统一回退为简体中文（采用 UTF-8 与 `\\uXXXX` 安全写入）。
+  - 结论：本次文案修复后，后端检查与测试通过（`ruff`、`pytest`），前端 `pnpm build` 通过。
+  - 风险：仍需你在浏览器运行态确认中文展示与交互文案符合预期（建议关闭旧标签页后重新打开页面验证）。
+
+- 2026-02-20T14:58:00-05:00
+  - 变更：新增端到端验证程序 `backend/scripts/verify_notifications_e2e.py`，自动覆盖 Phase 2.4 关键链路（源行程更新通知、纠错采纳通知、单条已读、全部已读）；执行过程中定位并修复 `dedupe_key` 超长触发 `varchar(128)` 截断导致的 500（`backend/app/services/notification_service.py` 增加超长哈希压缩策略）。
+  - 结论：`uv run --project backend python backend/scripts/verify_notifications_e2e.py` 运行通过并输出 PASS；后端回归测试 `pytest` 通过。
+  - 风险：自动化脚本会在本地数据库写入测试数据（用户/POI/行程/纠错/通知），如需保持库干净需后续补充清理脚本。
+- 2026-02-20T15:28:00-05:00
+  - 变更：根据用户明确指令“可以标记2.4收口了”，将 `P2-2.4-001` 状态由 `test_passed` 更新为 `done`，并补齐最终人工验收结论。
+  - 结论：Phase 2.4 达到收口条件（自动化门禁、迁移与版本同步、在线验证、用户人工验收均完成）。
+  - 风险：无新增 P0 阻塞。
+
+## Session Update (2026-02-20 Phase 2.5 Weather Integration)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.5-001 | Phase 2.5 | 天气集成 P1（和风天气 + 时间轴顶部天气条 + 开始日期锚点） | done | codex | 2026-02-20T18:01:43-05:00 | `backend/app/models/itinerary.py`, `backend/app/schemas/itinerary.py`, `backend/app/schemas/weather.py`, `backend/app/services/itinerary_service.py`, `backend/app/services/weather_service.py`, `backend/app/api/v1/weather.py`, `backend/app/api/v1/router.py`, `backend/app/core/config.py`, `backend/.env.example`, `backend/alembic/versions/20260220_0011_add_itinerary_start_date.py`, `backend/tests/test_weather_service.py`, `frontend/src/api.ts`, `frontend/src/pages/EditorWorkbenchPage.vue`, `frontend/src/components/TimelineWeatherStrip.vue`, `frontend/src/components/ItineraryDiffPanel.vue`, `frontend/src/styles.css`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 ...`=passed；`uv run --project backend pytest -q backend/tests/test_weather_service.py backend/tests/test_fork_and_diff_service.py backend/tests/test_itinerary_items_with_poi.py`=8 passed；`pnpm --dir frontend lint`=passed（warnings only, 0 error）；`pnpm --dir frontend build`=passed；`uv run alembic upgrade head` + `uv run alembic current`=`20260220_0011(head)`；版本一致性核验通过：本地源码命中 `TimelineWeatherStrip/fetchItineraryWeather/start_date`，容器源码 `/app/src/pages/EditorWorkbenchPage.vue` 与 `/app/src/api.ts` 命中同特征，在线产物 `http://localhost:5173/src/pages/EditorWorkbenchPage.vue` 命中 `fetchItineraryWeather/TimelineWeatherStrip`、`http://localhost:5173/src/components/TimelineWeatherStrip.vue` 命中 `weather-strip`；用户手工验证通过：天气系统可正常运行（控制台权限已生效） | 无 | Phase 2.5 收口完成，进入下一阶段需求评审与任务拆分 |
+
+### Changelog Addendum
+
+- 2026-02-20T03:15:46-05:00
+  - 变更：落地 Phase 2.5 P1，新增 `itineraries.start_date` 字段与迁移；后端新增 `GET /api/v1/itineraries/{id}/weather`（和风天气 + 30 分钟 TTL 缓存 + `force_refresh`）；前端编辑器新增开始日期输入与 `TimelineWeatherStrip` 天气展示条，并接入失败占位+手动重试。
+  - 结论：开发与自动化门禁均通过，任务状态更新为 `test_passed`（待用户运行态复测后再评估 `done`）。
+  - 风险：天气依赖第三方配额与网络稳定性；已通过缓存与非阻断降级降低影响。
+
+## Session Update (2026-02-20 Phase 2.5 Weather Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.5-002 | Phase 2.5 | 天气调用规范修复（按和风官方手册）+ 开始日期保存反馈增强 | done | codex | 2026-02-20T18:01:43-05:00 | `backend/app/services/weather_service.py`, `backend/app/core/config.py`, `backend/.env.example`, `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/services/weather_service.py backend/app/core/config.py`=passed；`uv run --project backend pytest -q backend/tests/test_weather_service.py`=3 passed；`pnpm --dir frontend build`=passed；用户手工验证通过：天气系统可正常运行（控制台权限已生效） | 无 | Phase 2.5 收口完成，进入下一阶段需求评审与任务拆分 |
+| P2-2.5-003 | Phase 2.5 | 天气接口可用性复测（控制台权限调整后） | done | codex | 2026-02-20T18:01:43-05:00 | `PROGRESS.md`, `backend/.env(本地环境配置修复，未纳入版本控制)` | 用户手工复测通过：开始日期保存有反馈、点击重试可正常获取天气，系统可稳定运行。 | 无 | Phase 2.5 收口完成，进入下一阶段需求评审与任务拆分 |
+
+### Changelog Addendum
+
+- 2026-02-20T03:20:57-05:00
+  - 变更：将天气服务改为官方规范调用：GeoAPI 与天气 API 分域名；认证头改为 `X-QW-Api-Key`；新增对和风响应 `code` 的显式校验与错误映射。前端开始日期保存流程改为“先提示保存成功，再刷新天气”，避免用户感知为无反馈。
+  - 结论：天气调用链路与交互反馈均完成修复，自动化门禁通过。
+  - 风险：仍需用户运行态最终确认（受第三方配额与网络时延影响）。
+- 2026-02-20T03:20:57-05:00
+  - 变更：进一步按官方手册收敛为 `query key` 鉴权，并将地理接口切到 `devapi` + `/geo/v2/city/lookup`；对非 2xx 返回的 `application/problem+json` 解析 `error.title/detail`，直接回传可读原因。
+  - 结论：当前报错已可准确定位为和风官方返回 `Invalid Host`（非前端交互故障）。
+  - 风险：需在和风控制台完成 key 的 Host/API 授权配置后才能恢复天气查询成功链路。
+- 2026-02-20T17:46:49-05:00
+  - 变更：按用户反馈“已修改控制台权限”执行二次复测，覆盖和风直连（`devapi` 与 `api` Host）与本地端到端链路（登录→创建行程→天气接口）。
+  - 结论：问题仍可稳定复现：两条官方 Host 均返回 `403 Invalid Host`；本地天气接口同步返回 `502` 且透传官方原因，说明应用侧调用链路与错误处理正常。
+  - 风险：外部依赖授权未生效前，天气能力仍不可用；任务状态维持 `blocked`。- 2026-02-20T18:02:42-05:00
+  - 变更：根据用户确认“天气系统已手工测试可正常运行”，执行 Phase 2.5 收口更新。
+  - 结论：P2-2.5-001/002/003 已统一为 done，Phase 2.5 收口完成。
+  - 风险：无新增 P0 阻塞。

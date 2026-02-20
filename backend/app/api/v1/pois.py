@@ -4,8 +4,25 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.poi import PoiCreate, PoiListResponse, PoiResponse, PoiUpdate
-from app.services.poi_service import create_poi, delete_poi, get_poi, list_pois, update_poi
+from app.schemas.poi import (
+    PoiCreate,
+    PoiListResponse,
+    PoiResponse,
+    PoiTicketRuleBatchUpsert,
+    PoiTicketRuleListResponse,
+    PoiUpdate,
+    PricingAudienceListResponse,
+)
+from app.services.poi_service import (
+    create_poi,
+    delete_poi,
+    get_poi,
+    list_pois,
+    list_pricing_audiences,
+    list_ticket_rules,
+    update_poi,
+    upsert_ticket_rules,
+)
 
 router = APIRouter(prefix="/pois", tags=["pois"])
 
@@ -24,6 +41,11 @@ def list_pois_api(
     return list_pois(db, offset, limit)
 
 
+@router.get("/pricing/audiences", response_model=PricingAudienceListResponse)
+def list_pricing_audiences_api(db: Session = Depends(get_db)) -> PricingAudienceListResponse:
+    return list_pricing_audiences(db)
+
+
 @router.get("/{poi_id}", response_model=PoiResponse)
 def get_poi_api(poi_id: UUID, db: Session = Depends(get_db)) -> PoiResponse:
     return get_poi(db, poi_id)
@@ -38,3 +60,16 @@ def update_poi_api(poi_id: UUID, payload: PoiUpdate, db: Session = Depends(get_d
 def delete_poi_api(poi_id: UUID, db: Session = Depends(get_db)) -> None:
     delete_poi(db, poi_id)
 
+
+@router.get("/{poi_id}/ticket-rules", response_model=PoiTicketRuleListResponse)
+def list_ticket_rules_api(poi_id: UUID, db: Session = Depends(get_db)) -> PoiTicketRuleListResponse:
+    return list_ticket_rules(db, poi_id)
+
+
+@router.put("/{poi_id}/ticket-rules", response_model=PoiTicketRuleListResponse)
+def upsert_ticket_rules_api(
+    poi_id: UUID,
+    payload: PoiTicketRuleBatchUpsert,
+    db: Session = Depends(get_db),
+) -> PoiTicketRuleListResponse:
+    return upsert_ticket_rules(db, poi_id, payload)

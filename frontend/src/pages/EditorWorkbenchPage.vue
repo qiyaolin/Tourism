@@ -7,13 +7,19 @@ import {
   deleteItineraryItem,
   fetchItineraries,
   fetchItineraryDiff,
+  fetchItineraryDiffActionStatuses,
   fetchItineraryItemsWithPoi,
+  fetchItineraryWeather,
   fetchPois,
+  submitItineraryDiffActionsBatch,
+  updateItinerary,
   updateItineraryItem,
+  type ItineraryDiffActionInput,
   type ItineraryDiffResponse,
   type ItineraryItemCreatePayload,
   type ItineraryItemWithPoi,
   type ItineraryResponse,
+  type ItineraryWeatherDayResponse,
   type PoiResponse
 } from "../api";
 import AiPlanGenerator from "../components/AiPlanGenerator.vue";
@@ -21,6 +27,7 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import ItineraryDiffPanel from "../components/ItineraryDiffPanel.vue";
 import PoiInfoCard from "../components/PoiInfoCard.vue";
 import TimelineEditor from "../components/TimelineEditor.vue";
+import TimelineWeatherStrip from "../components/TimelineWeatherStrip.vue";
 import { useAmap } from "../composables/useAmap";
 import { useAuth } from "../composables/useAuth";
 import type { AddTimelineBlockPayload, TimelineDraftItem, TimelineItemPatch } from "../types/timeline";
@@ -57,6 +64,14 @@ const diffOpen = ref(false);
 const diffLoading = ref(false);
 const diffError = ref("");
 const diffData = ref<ItineraryDiffResponse | null>(null);
+const diffActionQueue = ref<Record<string, ItineraryDiffActionInput>>({});
+const diffSubmitPending = ref(false);
+const diffSubmitError = ref("");
+const diffSubmitWarnings = ref<string[]>([]);
+const itineraryStartDateDraft = ref("");
+const weatherItems = ref<ItineraryWeatherDayResponse[]>([]);
+const weatherLoading = ref(false);
+const weatherError = ref("");
 
 const markerKeyToClientId = new Map<string, string>();
 const route = useRoute();
@@ -82,6 +97,7 @@ const selectedItinerary = computed(
 const authError = computed(() => error.value);
 const isDirty = computed(() => dirty.value && !savePending.value);
 const isForkedItinerary = computed(() => Boolean(selectedItinerary.value?.fork_source_itinerary_id));
+const hasStartDate = computed(() => Boolean(selectedItinerary.value?.start_date));
 
 const selectedMapItem = computed<ItineraryItemWithPoi | null>(() => {
   const target = draftItems.value.find((item) => item.clientId === activeItemClientId.value);
@@ -210,6 +226,14 @@ function resetItineraryState() {
   diffLoading.value = false;
   diffError.value = "";
   diffData.value = null;
+  diffActionQueue.value = {};
+  diffSubmitPending.value = false;
+  diffSubmitError.value = "";
+  diffSubmitWarnings.value = [];
+  itineraryStartDateDraft.value = "";
+  weatherItems.value = [];
+  weatherLoading.value = false;
+  weatherError.value = "";
   markerKeyToClientId.clear();
   clearMarkers();
 }
@@ -218,6 +242,10 @@ function resetDiffState(keepOpen = false) {
   diffLoading.value = false;
   diffError.value = "";
   diffData.value = null;
+  diffActionQueue.value = {};
+  diffSubmitPending.value = false;
+  diffSubmitError.value = "";
+  diffSubmitWarnings.value = [];
   if (!keepOpen) {
     diffOpen.value = false;
   }
@@ -235,6 +263,19 @@ async function loadDiffData(force = false) {
   diffError.value = "";
   try {
     diffData.value = await fetchItineraryDiff(selectedItineraryId.value, token.value);
+    const statuses = await fetchItineraryDiffActionStatuses(
+      selectedItineraryId.value,
+      diffData.value.source_snapshot_id,
+      token.value
+    );
+    const statusMap: Record<string, string> = {};
+    for (const item of statuses.items) {
+      statusMap[item.diff_key] = item.action;
+    }
+    diffData.value.action_statuses = {
+      ...diffData.value.action_statuses,
+      ...statusMap
+    };
   } catch (e) {
     diffData.value = null;
     diffError.value = e instanceof Error ? e.message : "加载修改对比失败";
@@ -251,6 +292,303 @@ async function toggleDiffPanel() {
   if (diffOpen.value) {
     await loadDiffData();
   }
+}
+
+function parseItemKey(key: string): { dayIndex: number; sortOrder: number } | null {
+  const match = key.match(/^d(\d+)-s(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  return { dayIndex: Number(match[1]), sortOrder: Number(match[2]) };
+}
+
+function findDraftIndexByItemKey(itemKey: string): number {
+  const parsed = parseItemKey(itemKey);
+  if (!parsed) {
+    return -1;
+  }
+  return draftItems.value.findIndex(
+    (item) => item.dayIndex === parsed.dayIndex && item.sortOrder === parsed.sortOrder
+  );
+}
+
+function normalizeNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function applyMetadataField(field: string, value: unknown) {
+  const current = selectedItinerary.value;
+  if (!current) {
+    return;
+  }
+  const target = itineraries.value.find((item) => item.id === current.id);
+  if (!target) {
+    return;
+  }
+  if (field === "title" && typeof value === "string") {
+    target.title = value;
+    return;
+  }
+  if (field === "destination" && typeof value === "string") {
+    target.destination = value;
+    return;
+  }
+  if (field === "days") {
+    const days = normalizeNumber(value);
+    if (days !== null) {
+      target.days = Math.max(1, Math.floor(days));
+    }
+    return;
+  }
+  if (field === "status" && typeof value === "string") {
+    target.status = value;
+    return;
+  }
+  if (field === "visibility" && typeof value === "string") {
+    target.visibility = value;
+    return;
+  }
+  if (field === "cover_image_url") {
+    target.cover_image_url = normalizeString(value);
+  }
+}
+
+function applyModifiedField(itemKey: string, field: string, value: unknown) {
+  const index = findDraftIndexByItemKey(itemKey);
+  if (index < 0) {
+    return;
+  }
+  const item = draftItems.value[index];
+  if (field === "day_index") {
+    const num = normalizeNumber(value);
+    if (num !== null) {
+      item.dayIndex = Math.max(1, Math.floor(num));
+    }
+    return;
+  }
+  if (field === "sort_order") {
+    const num = normalizeNumber(value);
+    if (num !== null) {
+      item.sortOrder = Math.max(1, Math.floor(num));
+    }
+    return;
+  }
+  if (field === "start_time") {
+    item.startTime = normalizeString(value);
+    return;
+  }
+  if (field === "duration_minutes") {
+    item.durationMinutes = normalizeNumber(value);
+    return;
+  }
+  if (field === "cost") {
+    item.cost = normalizeNumber(value);
+    return;
+  }
+  if (field === "tips") {
+    item.tips = normalizeString(value);
+    return;
+  }
+  if (field === "poi_id" && typeof value === "string") {
+    item.poi.id = value;
+    return;
+  }
+  if (field === "poi_name" && typeof value === "string") {
+    item.poi.name = value;
+    return;
+  }
+  if (field === "poi_type" && typeof value === "string") {
+    item.poi.type = value;
+    return;
+  }
+  if (field === "longitude") {
+    const num = normalizeNumber(value);
+    if (num !== null) {
+      item.poi.longitude = num;
+    }
+    return;
+  }
+  if (field === "latitude") {
+    const num = normalizeNumber(value);
+    if (num !== null) {
+      item.poi.latitude = num;
+    }
+    return;
+  }
+  if (field === "address") {
+    item.poi.address = normalizeString(value);
+    return;
+  }
+  if (field === "opening_hours") {
+    item.poi.opening_hours = normalizeString(value);
+    return;
+  }
+  if (field === "ticket_price") {
+    item.poi.ticket_price = normalizeNumber(value);
+  }
+}
+
+function restoreRemovedItem(itemKey: string, source: Record<string, unknown>) {
+  const parsed = parseItemKey(itemKey);
+  if (!parsed) {
+    return;
+  }
+  const existingIndex = findDraftIndexByItemKey(itemKey);
+  if (existingIndex >= 0) {
+    return;
+  }
+  const poiId = normalizeString(source.poi_id);
+  if (!poiId) {
+    return;
+  }
+  draftItems.value.push({
+    clientId: makeClientId(),
+    itemId: null,
+    itineraryId: selectedItineraryId.value,
+    dayIndex: parsed.dayIndex,
+    sortOrder: parsed.sortOrder,
+    startTime: normalizeString(source.start_time),
+    durationMinutes: normalizeNumber(source.duration_minutes),
+    cost: normalizeNumber(source.cost),
+    tips: normalizeString(source.tips),
+      poi: {
+        id: poiId,
+        name: normalizeString(source.poi_name) || "未命名节点",
+        type: normalizeString(source.poi_type) || "unknown",
+        longitude: normalizeNumber(source.longitude) || 0,
+        latitude: normalizeNumber(source.latitude) || 0,
+        address: normalizeString(source.address),
+        opening_hours: normalizeString(source.opening_hours),
+        ticket_price: normalizeNumber(source.ticket_price),
+        ticket_rules: []
+      }
+    });
+}
+
+function applyDiffActionLocally(payload: {
+  diff_key: string;
+  diff_type: ItineraryDiffActionInput["diff_type"];
+  action: ItineraryDiffActionInput["action"];
+  item_key?: string;
+  field?: string;
+  before?: unknown;
+  after?: unknown;
+  current?: Record<string, unknown>;
+  source?: Record<string, unknown>;
+}) {
+  if (payload.action === "ignored" || payload.action === "read") {
+    return;
+  }
+  if (payload.diff_type === "metadata" && payload.field) {
+    applyMetadataField(payload.field, payload.action === "applied" ? payload.after : payload.before);
+    return;
+  }
+  if (payload.diff_type === "modified" && payload.item_key && payload.field) {
+    applyModifiedField(
+      payload.item_key,
+      payload.field,
+      payload.action === "applied" ? payload.after : payload.before
+    );
+    dirty.value = true;
+    return;
+  }
+  if (payload.diff_type === "added" && payload.item_key) {
+    if (payload.action === "rolled_back") {
+      const index = findDraftIndexByItemKey(payload.item_key);
+      if (index >= 0) {
+        draftItems.value.splice(index, 1);
+        dirty.value = true;
+      }
+    }
+    return;
+  }
+  if (payload.diff_type === "removed" && payload.item_key) {
+    if (payload.action === "rolled_back" && payload.source) {
+      restoreRemovedItem(payload.item_key, payload.source);
+      dirty.value = true;
+    }
+  }
+}
+
+function stageDiffAction(payload: {
+  diff_key: string;
+  diff_type: ItineraryDiffActionInput["diff_type"];
+  action: ItineraryDiffActionInput["action"];
+  reason?: string | null;
+  item_key?: string;
+  field?: string;
+  before?: unknown;
+  after?: unknown;
+  current?: Record<string, unknown>;
+  source?: Record<string, unknown>;
+}) {
+  applyDiffActionLocally(payload);
+  diffActionQueue.value[payload.diff_key] = {
+    diff_key: payload.diff_key,
+    diff_type: payload.diff_type,
+    action: payload.action,
+    reason: payload.reason || null
+  };
+  if (diffData.value) {
+    diffData.value.action_statuses = {
+      ...diffData.value.action_statuses,
+      [payload.diff_key]: payload.action
+    };
+  }
+}
+
+async function submitQueuedDiffActions() {
+  if (!token.value || !selectedItineraryId.value || !diffData.value) {
+    return;
+  }
+  const actions = Object.values(diffActionQueue.value);
+  if (actions.length === 0) {
+    return;
+  }
+  diffSubmitPending.value = true;
+  diffSubmitError.value = "";
+  diffSubmitWarnings.value = [];
+  try {
+    const result = await submitItineraryDiffActionsBatch(
+      selectedItineraryId.value,
+      diffData.value.source_snapshot_id,
+      actions,
+      token.value
+    );
+    diffActionQueue.value = {};
+    diffSubmitWarnings.value = result.warnings;
+    diffData.value.action_statuses = {
+      ...diffData.value.action_statuses,
+      ...result.action_statuses
+    };
+  } catch (e) {
+    diffSubmitError.value = e instanceof Error ? e.message : "提交 Diff 动作失败";
+  } finally {
+    diffSubmitPending.value = false;
+  }
+}
+
+function jumpToDiffKey(itemKey: string) {
+  const index = findDraftIndexByItemKey(itemKey);
+  if (index < 0) {
+    return;
+  }
+  const item = draftItems.value[index];
+  activeDay.value = item.dayIndex;
+  activeItemClientId.value = item.clientId;
+  focusMarker(item.itemId || item.clientId);
 }
 
 function setActiveByClientId(clientId: string) {
@@ -361,7 +699,8 @@ function addItem(payload: AddTimelineBlockPayload) {
       latitude: payload.poi.latitude,
       address: payload.poi.address,
       opening_hours: payload.poi.opening_hours,
-      ticket_price: payload.poi.ticket_price
+      ticket_price: payload.poi.ticket_price,
+      ticket_rules: payload.poi.ticket_rules || []
     }
   };
   draftItems.value = [...draftItems.value, newItem];
@@ -431,15 +770,43 @@ async function loadSelectedItineraryItems() {
     } else {
       resetDiffState(true);
     }
+    itineraryStartDateDraft.value = selectedItinerary.value?.start_date || "";
+    await loadWeather();
   } catch (e) {
     baselineItems.value = [];
     draftItems.value = [];
     activeItemClientId.value = "";
     resetDiffState();
     clearMarkers();
+    weatherItems.value = [];
+    weatherError.value = "";
     itineraryError.value = e instanceof Error ? e.message : "加载行程地点失败";
   } finally {
     itineraryLoading.value = false;
+  }
+}
+
+async function loadWeather(forceRefresh = false) {
+  if (!token.value || !selectedItineraryId.value) {
+    weatherItems.value = [];
+    weatherError.value = "";
+    return;
+  }
+  if (!selectedItinerary.value?.start_date) {
+    weatherItems.value = [];
+    weatherError.value = "";
+    return;
+  }
+  weatherLoading.value = true;
+  weatherError.value = "";
+  try {
+    const payload = await fetchItineraryWeather(selectedItineraryId.value, token.value, forceRefresh);
+    weatherItems.value = payload.items;
+  } catch (e) {
+    weatherItems.value = [];
+    weatherError.value = e instanceof Error ? e.message : "加载天气失败";
+  } finally {
+    weatherLoading.value = false;
   }
 }
 
@@ -563,6 +930,7 @@ async function handleSaveChanges() {
     if (diffOpen.value) {
       await loadDiffData(true);
     }
+    diffActionQueue.value = {};
     saveSuccess.value = "已保存时间轴更改";
     dirty.value = false;
   } catch (e) {
@@ -573,10 +941,40 @@ async function handleSaveChanges() {
   }
 }
 
+async function handleSaveStartDate() {
+  if (!token.value || !selectedItineraryId.value) {
+    return;
+  }
+  savePending.value = true;
+  saveError.value = "";
+  saveSuccess.value = "";
+  try {
+    const normalized = itineraryStartDateDraft.value.trim() || null;
+    const updated = await updateItinerary(
+      selectedItineraryId.value,
+      { start_date: normalized },
+      token.value
+    );
+    const target = itineraries.value.find((item) => item.id === selectedItineraryId.value);
+    if (target) {
+      target.start_date = updated.start_date;
+    }
+    itineraryStartDateDraft.value = updated.start_date || "";
+    saveSuccess.value = "开始日期已保存，正在刷新天气";
+    await loadWeather(true);
+    saveSuccess.value = "开始日期已保存";
+  } catch (e) {
+    saveError.value = e instanceof Error ? e.message : "更新开始日期失败";
+  } finally {
+    savePending.value = false;
+  }
+}
+
 async function handleCancelChanges() {
   saveError.value = "";
   saveSuccess.value = "";
   await loadSelectedItineraryItems();
+  diffActionQueue.value = {};
   if (diffOpen.value) {
     await loadDiffData(true);
   }
@@ -864,6 +1262,20 @@ onBeforeUnmount(() => {
           >
             {{ saveSuccess }}
           </p>
+          <label class="field-label">开始日期（天气映射基准）</label>
+          <input
+            v-model="itineraryStartDateDraft"
+            class="input"
+            type="date"
+            :disabled="savePending || !selectedItineraryId"
+          >
+          <button
+            class="btn"
+            :disabled="savePending || !selectedItineraryId"
+            @click="handleSaveStartDate"
+          >
+            保存开始日期
+          </button>
           <div class="action-row">
             <button
               class="btn"
@@ -907,10 +1319,26 @@ onBeforeUnmount(() => {
           :loading="diffLoading"
           :error="diffError"
           :diff="diffData"
+          :active-day="activeDay"
+          :queued-count="Object.keys(diffActionQueue).length"
+          :submit-pending="diffSubmitPending"
+          :submit-error="diffSubmitError"
+          :submit-warnings="diffSubmitWarnings"
+          :items="draftItems"
+          @jump-to-key="jumpToDiffKey"
+          @stage-action="stageDiffAction"
+          @submit-actions="submitQueuedDiffActions"
         />
       </aside>
 
       <section class="editor-panel">
+        <TimelineWeatherStrip
+          :loading="weatherLoading"
+          :error="weatherError"
+          :has-start-date="hasStartDate"
+          :items="weatherItems"
+          @retry="loadWeather(true)"
+        />
         <TimelineEditor
           v-if="selectedItinerary"
           :days="selectedItinerary.days"
@@ -959,6 +1387,8 @@ onBeforeUnmount(() => {
         <PoiInfoCard
           v-if="selectedMapItem"
           :item="selectedMapItem"
+          :token="token || ''"
+          :source-itinerary-id="selectedItineraryId || null"
         />
       </section>
     </section>

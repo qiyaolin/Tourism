@@ -3,8 +3,11 @@ import { createRouter, createWebHistory } from "vue-router";
 import ExplorePage from "./pages/ExplorePage.vue";
 import LoginPage from "./pages/LoginPage.vue";
 import MyItinerariesPage from "./pages/MyItinerariesPage.vue";
+import MyCorrectionsPage from "./pages/MyCorrectionsPage.vue";
 import PublicItineraryPage from "./pages/PublicItineraryPage.vue";
 import EditorWorkbenchPage from "./pages/EditorWorkbenchPage.vue";
+import CorrectionReviewPage from "./pages/CorrectionReviewPage.vue";
+import NotificationsPage from "./pages/NotificationsPage.vue";
 import { useAuth } from "./composables/useAuth";
 
 const routes = [
@@ -13,7 +16,10 @@ const routes = [
   { path: "/explore", component: ExplorePage },
   { path: "/itineraries/:id", component: PublicItineraryPage, props: true },
   { path: "/mine", component: MyItinerariesPage, meta: { requiresAuth: true } },
-  { path: "/editor", component: EditorWorkbenchPage, meta: { requiresAuth: true } }
+  { path: "/editor", component: EditorWorkbenchPage, meta: { requiresAuth: true } },
+  { path: "/corrections/mine", component: MyCorrectionsPage, meta: { requiresAuth: true } },
+  { path: "/corrections/review", component: CorrectionReviewPage, meta: { requiresAuth: true } },
+  { path: "/notifications", component: NotificationsPage, meta: { requiresAuth: true } }
 ];
 
 const router = createRouter({

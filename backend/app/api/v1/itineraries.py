@@ -7,6 +7,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.itinerary import (
     ItineraryCreate,
+    ItineraryDiffActionBatchRequest,
+    ItineraryDiffActionBatchResponse,
+    ItineraryDiffActionStatusResponse,
     ItineraryDiffResponse,
     ItineraryItemCreate,
     ItineraryItemResponse,
@@ -24,8 +27,10 @@ from app.services.itinerary_service import (
     delete_itinerary,
     get_itinerary,
     get_itinerary_diff,
+    get_itinerary_diff_action_statuses,
     list_items_with_poi,
     list_itineraries,
+    submit_itinerary_diff_actions_batch,
     update_item,
     update_itinerary,
 )
@@ -68,6 +73,26 @@ def get_itinerary_diff_api(
     current_user: User = Depends(get_current_user),
 ) -> ItineraryDiffResponse:
     return get_itinerary_diff(db, itinerary_id, current_user)
+
+
+@router.post("/{itinerary_id}/diff/actions:batch", response_model=ItineraryDiffActionBatchResponse)
+def submit_itinerary_diff_actions_batch_api(
+    itinerary_id: UUID,
+    payload: ItineraryDiffActionBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ItineraryDiffActionBatchResponse:
+    return submit_itinerary_diff_actions_batch(db, itinerary_id, current_user, payload)
+
+
+@router.get("/{itinerary_id}/diff/actions", response_model=ItineraryDiffActionStatusResponse)
+def get_itinerary_diff_action_statuses_api(
+    itinerary_id: UUID,
+    source_snapshot_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ItineraryDiffActionStatusResponse:
+    return get_itinerary_diff_action_statuses(db, itinerary_id, current_user, source_snapshot_id)
 
 
 @router.get("/{itinerary_id}/items", response_model=ItineraryItemsWithPoiListResponse)
