@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/itineraries", tags=["weather"])
 def get_itinerary_weather_api(
     itinerary_id: UUID,
     force_refresh: bool = Query(default=False),
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryWeatherResponse:
@@ -23,5 +24,6 @@ def get_itinerary_weather_api(
         db,
         itinerary_id,
         current_user,
+        collab_grant=collab_grant,
         force_refresh=force_refresh,
     )

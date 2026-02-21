@@ -269,6 +269,7 @@ export type CollabLinkResponse = {
   id: string;
   itinerary_id: string;
   permission: "edit" | "read";
+  share_code_last4: string;
   is_revoked: boolean;
   created_by_user_id: string;
   created_at: string;
@@ -277,7 +278,7 @@ export type CollabLinkResponse = {
 
 export type CollabLinkCreateResponse = {
   link: CollabLinkResponse;
-  token: string;
+  share_code: string;
   share_url: string;
 };
 
@@ -312,6 +313,14 @@ export type CollabParticipant = {
   permission: "edit" | "read";
   joined_at: string;
   cursor: Record<string, unknown> | null;
+};
+
+export type CollabCodeResolveResponse = {
+  itinerary_id: string;
+  itinerary_title: string;
+  permission: "edit" | "read";
+  collab_grant: string;
+  expires_in: number;
 };
 
 
@@ -521,13 +530,15 @@ async function parseJsonResponse<T>(response: Response, requestLabel: string): P
   return (await response.json()) as T;
 }
 
-function authHeaders(token?: string): HeadersInit {
-  if (!token) {
-    return {};
+function authHeaders(token?: string, collabGrant?: string): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
-  return {
-    Authorization: `Bearer ${token}`
-  };
+  if (collabGrant) {
+    headers["X-Collab-Grant"] = collabGrant;
+  }
+  return headers;
 }
 
 export async function fetchLiveHealth(): Promise<HealthLiveResponse> {
@@ -550,12 +561,13 @@ export async function fetchItineraries(token: string): Promise<ItineraryListResp
 export async function updateItinerary(
   itineraryId: string,
   payload: ItineraryUpdatePayload,
-  token: string
+  token: string,
+  collabGrant?: string
 ): Promise<ItineraryResponse> {
   const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}`, {
     method: "PUT",
     headers: {
-      ...authHeaders(token),
+      ...authHeaders(token, collabGrant),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -777,22 +789,35 @@ export async function fetchCollabHistory(
 
 export async function fetchItineraryItemsWithPoi(
   itineraryId: string,
-  token: string
+  token: string,
+  collabGrant?: string
 ): Promise<ItineraryItemsWithPoiListResponse> {
   const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/items`, {
-    headers: authHeaders(token)
+    headers: authHeaders(token, collabGrant)
   });
   return parseJsonResponse<ItineraryItemsWithPoiListResponse>(response, "List itinerary items request");
+}
+
+export async function fetchItineraryById(
+  itineraryId: string,
+  token: string,
+  collabGrant?: string
+): Promise<ItineraryResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}`, {
+    headers: authHeaders(token, collabGrant)
+  });
+  return parseJsonResponse<ItineraryResponse>(response, "Get itinerary request");
 }
 
 export async function fetchItineraryWeather(
   itineraryId: string,
   token: string,
-  forceRefresh = false
+  forceRefresh = false,
+  collabGrant?: string
 ): Promise<ItineraryWeatherResponse> {
   const response = await fetch(
     `${API_BASE_URL}/itineraries/${itineraryId}/weather?force_refresh=${forceRefresh ? "true" : "false"}`,
-    { headers: authHeaders(token) }
+    { headers: authHeaders(token, collabGrant) }
   );
   return parseJsonResponse<ItineraryWeatherResponse>(response, "Fetch itinerary weather request");
 }
@@ -867,12 +892,13 @@ export async function fetchItineraryDiffActionStatuses(
 export async function createItineraryItem(
   itineraryId: string,
   payload: ItineraryItemCreatePayload,
-  token: string
+  token: string,
+  collabGrant?: string
 ): Promise<ItineraryItemResponse> {
   const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/items`, {
     method: "POST",
     headers: {
-      ...authHeaders(token),
+      ...authHeaders(token, collabGrant),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -884,12 +910,13 @@ export async function updateItineraryItem(
   itineraryId: string,
   itemId: string,
   payload: ItineraryItemUpdatePayload,
-  token: string
+  token: string,
+  collabGrant?: string
 ): Promise<ItineraryItemResponse> {
   const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/items/${itemId}`, {
     method: "PUT",
     headers: {
-      ...authHeaders(token),
+      ...authHeaders(token, collabGrant),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -897,10 +924,15 @@ export async function updateItineraryItem(
   return parseJsonResponse<ItineraryItemResponse>(response, "Update itinerary item request");
 }
 
-export async function deleteItineraryItem(itineraryId: string, itemId: string, token: string): Promise<void> {
+export async function deleteItineraryItem(
+  itineraryId: string,
+  itemId: string,
+  token: string,
+  collabGrant?: string
+): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/items/${itemId}`, {
     method: "DELETE",
-    headers: authHeaders(token)
+    headers: authHeaders(token, collabGrant)
   });
   if (!response.ok) {
     const text = await response.text();
@@ -908,6 +940,21 @@ export async function deleteItineraryItem(itineraryId: string, itemId: string, t
       `Delete itinerary item request failed with ${response.status}. Response: ${text.slice(0, 120)}`
     );
   }
+}
+
+export async function resolveCollabCode(
+  code: string,
+  token: string
+): Promise<CollabCodeResolveResponse> {
+  const response = await fetch(`${API_BASE_URL}/collab/code/resolve`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ code })
+  });
+  return parseJsonResponse<CollabCodeResolveResponse>(response, "Resolve collab code request");
 }
 
 export async function previewAiPlan(payload: AiPreviewRequest, token: string): Promise<AiPreviewResponse> {

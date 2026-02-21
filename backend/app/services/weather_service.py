@@ -10,9 +10,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.itinerary import Itinerary
 from app.models.user import User
 from app.schemas.weather import ItineraryWeatherDayResponse, ItineraryWeatherResponse
+from app.services.collab_service import resolve_itinerary_access
 
 _CACHE_TTL = timedelta(minutes=30)
 _cache_lock = Lock()
@@ -207,11 +207,16 @@ def get_itinerary_weather(
     itinerary_id: UUID,
     current_user: User,
     *,
+    collab_grant: str | None = None,
     force_refresh: bool = False,
 ) -> ItineraryWeatherResponse:
-    itinerary = db.get(Itinerary, itinerary_id)
-    if itinerary is None or itinerary.creator_user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+    itinerary = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        current_user,
+        collab_grant=collab_grant,
+        require_edit=False,
+    ).itinerary
     if itinerary.start_date is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先设置行程开始日期")
 

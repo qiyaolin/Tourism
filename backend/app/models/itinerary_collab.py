@@ -34,6 +34,10 @@ class ItineraryCollabLink(Base):
         index=True,
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    share_code_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    share_code_last4: Mapped[str] = mapped_column(String(4), nullable=False)
     permission: Mapped[str] = mapped_column(
         String(16), nullable=False, default="edit", server_default="edit"
     )

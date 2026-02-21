@@ -9,6 +9,7 @@ const TEXT = {
   explore: "\u63a2\u7d22\u5e7f\u573a",
   mine: "\u6211\u7684\u884c\u7a0b",
   editor: "\u7f16\u8f91\u5668",
+  joinCollab: "\u52a0\u5165\u534f\u4f5c",
   myCorrections: "\u6211\u7684\u7ea0\u9519",
   review: "\u7ea0\u9519\u5ba1\u6838",
   signal: "\u9884\u8b66\u4e2d\u5fc3",
@@ -67,6 +68,7 @@ watch(
           <RouterLink :class="['site-link', { active: isActive('/explore') }]" to="/explore">{{ TEXT.explore }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/mine') }]" to="/mine">{{ TEXT.mine }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/editor') }]" to="/editor">{{ TEXT.editor }}</RouterLink>
+          <RouterLink :class="['site-link', { active: isActive('/collab/join') }]" to="/collab/join">{{ TEXT.joinCollab }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/corrections/mine') }]" to="/corrections/mine">{{ TEXT.myCorrections }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/corrections/review') }]" to="/corrections/review">{{ TEXT.review }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/notifications') }]" to="/notifications">

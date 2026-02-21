@@ -18,6 +18,7 @@ class ItineraryCollabLinkResponse(BaseModel):
     id: UUID
     itinerary_id: UUID
     permission: Literal["edit", "read"]
+    share_code_last4: str
     is_revoked: bool
     created_by_user_id: UUID
     created_at: datetime
@@ -26,7 +27,7 @@ class ItineraryCollabLinkResponse(BaseModel):
 
 class ItineraryCollabLinkCreateResponse(BaseModel):
     link: ItineraryCollabLinkResponse
-    token: str
+    share_code: str
     share_url: str
 
 
@@ -69,3 +70,15 @@ class ItineraryCollabWsJoinedPayload(BaseModel):
     participants: list[ItineraryCollabParticipant] = Field(default_factory=list)
     snapshot_update_b64: str | None = None
     needs_seed: bool = False
+
+
+class CollabCodeResolveRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+
+
+class CollabCodeResolveResponse(BaseModel):
+    itinerary_id: UUID
+    itinerary_title: str
+    permission: Literal["edit", "read"]
+    collab_grant: str
+    expires_in: int

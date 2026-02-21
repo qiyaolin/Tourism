@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -60,10 +60,11 @@ def list_itineraries_api(
 @router.get("/{itinerary_id}", response_model=ItineraryResponse)
 def get_itinerary_api(
     itinerary_id: UUID,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryResponse:
-    return get_itinerary(db, itinerary_id, current_user)
+    return get_itinerary(db, itinerary_id, current_user, collab_grant=collab_grant)
 
 
 @router.get("/{itinerary_id}/diff", response_model=ItineraryDiffResponse)
@@ -98,20 +99,22 @@ def get_itinerary_diff_action_statuses_api(
 @router.get("/{itinerary_id}/items", response_model=ItineraryItemsWithPoiListResponse)
 def list_items_with_poi_api(
     itinerary_id: UUID,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryItemsWithPoiListResponse:
-    return list_items_with_poi(db, itinerary_id, current_user)
+    return list_items_with_poi(db, itinerary_id, current_user, collab_grant=collab_grant)
 
 
 @router.put("/{itinerary_id}", response_model=ItineraryResponse)
 def update_itinerary_api(
     itinerary_id: UUID,
     payload: ItineraryUpdate,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryResponse:
-    return update_itinerary(db, itinerary_id, current_user, payload)
+    return update_itinerary(db, itinerary_id, current_user, payload, collab_grant=collab_grant)
 
 
 @router.delete("/{itinerary_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -131,10 +134,11 @@ def delete_itinerary_api(
 def create_item_api(
     itinerary_id: UUID,
     payload: ItineraryItemCreate,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryItemResponse:
-    return create_item(db, itinerary_id, current_user, payload)
+    return create_item(db, itinerary_id, current_user, payload, collab_grant=collab_grant)
 
 
 @router.put("/{itinerary_id}/items/{item_id}", response_model=ItineraryItemResponse)
@@ -142,17 +146,19 @@ def update_item_api(
     itinerary_id: UUID,
     item_id: UUID,
     payload: ItineraryItemUpdate,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ItineraryItemResponse:
-    return update_item(db, itinerary_id, item_id, current_user, payload)
+    return update_item(db, itinerary_id, item_id, current_user, payload, collab_grant=collab_grant)
 
 
 @router.delete("/{itinerary_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_item_api(
     itinerary_id: UUID,
     item_id: UUID,
+    collab_grant: str | None = Header(default=None, alias="X-Collab-Grant"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    delete_item(db, itinerary_id, item_id, current_user)
+    delete_item(db, itinerary_id, item_id, current_user, collab_grant=collab_grant)

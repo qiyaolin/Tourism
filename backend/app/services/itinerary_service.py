@@ -41,6 +41,7 @@ from app.schemas.itinerary import (
     PublicItineraryListResponse,
     PublicItineraryResponse,
 )
+from app.services.collab_service import resolve_itinerary_access
 from app.services.notification_service import notify_source_itinerary_updated
 
 _META_DIFF_FIELDS = ("title", "destination", "days", "status", "visibility", "cover_image_url", "start_date")
@@ -444,10 +445,21 @@ def list_itineraries(db: Session, creator: User, offset: int, limit: int) -> Iti
     )
 
 
-def get_itinerary(db: Session, itinerary_id: UUID, creator: User) -> ItineraryResponse:
-    row = db.get(Itinerary, itinerary_id)
-    if row is None or row.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+def get_itinerary(
+    db: Session,
+    itinerary_id: UUID,
+    creator: User,
+    *,
+    collab_grant: str | None = None,
+) -> ItineraryResponse:
+    access = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=False,
+    )
+    row = access.itinerary
     meta_map = _get_fork_source_meta_map(db, [row.id])
     return _itinerary_to_response(row, meta_map.get(row.id))
 
@@ -751,11 +763,19 @@ def get_itinerary_diff_action_statuses(
 
 
 def list_items_with_poi(
-    db: Session, itinerary_id: UUID, creator: User
+    db: Session,
+    itinerary_id: UUID,
+    creator: User,
+    *,
+    collab_grant: str | None = None,
 ) -> ItineraryItemsWithPoiListResponse:
-    itinerary = db.get(Itinerary, itinerary_id)
-    if itinerary is None or itinerary.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+    resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=False,
+    )
 
     stmt = (
         select(ItineraryItem, Poi, func.ST_AsText(Poi.geom))
@@ -844,10 +864,16 @@ def update_itinerary(
     itinerary_id: UUID,
     creator: User,
     payload: ItineraryUpdate,
+    *,
+    collab_grant: str | None = None,
 ) -> ItineraryResponse:
-    row = db.get(Itinerary, itinerary_id)
-    if row is None or row.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+    row = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=True,
+    ).itinerary
     data = payload.model_dump(exclude_unset=True)
     old_status = row.status
     if "status" in data:
@@ -906,10 +932,16 @@ def create_item(
     itinerary_id: UUID,
     creator: User,
     payload: ItineraryItemCreate,
+    *,
+    collab_grant: str | None = None,
 ) -> ItineraryItemResponse:
-    itinerary = db.get(Itinerary, itinerary_id)
-    if itinerary is None or itinerary.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+    itinerary = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=True,
+    ).itinerary
     if payload.day_index > itinerary.days:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -961,10 +993,16 @@ def update_item(
     item_id: UUID,
     creator: User,
     payload: ItineraryItemUpdate,
+    *,
+    collab_grant: str | None = None,
 ) -> ItineraryItemResponse:
-    itinerary = db.get(Itinerary, itinerary_id)
-    if itinerary is None or itinerary.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+    itinerary = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=True,
+    ).itinerary
     item = db.get(ItineraryItem, item_id)
     if item is None or item.itinerary_id != itinerary_id:
         raise HTTPException(
@@ -1004,10 +1042,21 @@ def update_item(
     return _item_to_response(item)
 
 
-def delete_item(db: Session, itinerary_id: UUID, item_id: UUID, creator: User) -> None:
-    itinerary = db.get(Itinerary, itinerary_id)
-    if itinerary is None or itinerary.creator_user_id != creator.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+def delete_item(
+    db: Session,
+    itinerary_id: UUID,
+    item_id: UUID,
+    creator: User,
+    *,
+    collab_grant: str | None = None,
+) -> None:
+    itinerary = resolve_itinerary_access(
+        db,
+        itinerary_id,
+        creator,
+        collab_grant=collab_grant,
+        require_edit=True,
+    ).itinerary
     item = db.get(ItineraryItem, item_id)
     if item is None or item.itinerary_id != itinerary_id:
         raise HTTPException(

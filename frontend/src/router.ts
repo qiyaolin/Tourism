@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import ExplorePage from "./pages/ExplorePage.vue";
+import CollabJoinPage from "./pages/CollabJoinPage.vue";
 import LoginPage from "./pages/LoginPage.vue";
 import MyItinerariesPage from "./pages/MyItinerariesPage.vue";
 import MyCorrectionsPage from "./pages/MyCorrectionsPage.vue";
@@ -13,6 +14,7 @@ import { useAuth } from "./composables/useAuth";
 const routes = [
   { path: "/", redirect: "/explore" },
   { path: "/login", component: LoginPage },
+  { path: "/collab/join", component: CollabJoinPage, meta: { requiresAuth: true } },
   { path: "/explore", component: ExplorePage },
   { path: "/itineraries/:id", component: PublicItineraryPage, props: true },
   { path: "/mine", component: MyItinerariesPage, meta: { requiresAuth: true } },

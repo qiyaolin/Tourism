@@ -9,6 +9,7 @@ import {
   fetchCollabHistory,
   fetchCollabLinks,
   fetchItineraries,
+  fetchItineraryById,
   fetchItineraryDiff,
   fetchItineraryDiffActionStatuses,
   fetchItineraryItemsWithPoi,
@@ -87,7 +88,7 @@ const collabShareUrl = ref("");
 const collabCreatePending = ref(false);
 const collabPermissionDraft = ref<"edit" | "read">("edit");
 const applyingRemoteCollab = ref(false);
-const guestCollabName = ref("");
+const collabShareCode = ref("");
 
 const markerKeyToClientId = new Map<string, string>();
 const route = useRoute();
@@ -102,7 +103,9 @@ const {
   sendLoginCode,
   loginWithCode,
   clearAuth,
-  loadMe
+  loadMe,
+  getCollabGrant,
+  clearCollabGrant
 } = useAuth();
 
 const { mapReady, initMap, renderMarkers, focusMarker, clearMarkers, destroyMap } = useAmap(mapHost);
@@ -114,16 +117,20 @@ const authError = computed(() => error.value);
 const isDirty = computed(() => dirty.value && !savePending.value);
 const isForkedItinerary = computed(() => Boolean(selectedItinerary.value?.fork_source_itinerary_id));
 const hasStartDate = computed(() => Boolean(selectedItinerary.value?.start_date));
-const collabTokenFromQuery = computed(() =>
-  typeof route.query.collab_token === "string" ? route.query.collab_token.trim() : ""
+const selectedCollabGrantEntry = computed(() => getCollabGrant(selectedItineraryId.value));
+const selectedCollabGrant = computed(() => selectedCollabGrantEntry.value?.grant || "");
+const canManageCollabLinks = computed(
+  () => Boolean(selectedItinerary.value && user.value && selectedItinerary.value.creator_user_id === user.value.id)
 );
-const guestItineraryIdFromQuery = computed(() =>
-  typeof route.query.itinerary_id === "string" ? route.query.itinerary_id.trim() : ""
-);
-const isGuestEntry = computed(
-  () => !isLoggedIn.value && Boolean(collabTokenFromQuery.value && guestItineraryIdFromQuery.value)
-);
-const collabGuestName = computed(() => user.value?.nickname || guestCollabName.value.trim());
+const canSaveToServer = computed(() => {
+  if (!token.value || !selectedItineraryId.value) {
+    return false;
+  }
+  if (canManageCollabLinks.value) {
+    return true;
+  }
+  return selectedCollabGrantEntry.value?.permission === "edit";
+});
 
 const selectedMapItem = computed<ItineraryItemWithPoi | null>(() => {
   const target = draftItems.value.find((item) => item.clientId === activeItemClientId.value);
@@ -135,8 +142,7 @@ const selectedMapItem = computed<ItineraryItemWithPoi | null>(() => {
 const collab = useYjsCollab({
   itineraryId: () => selectedItineraryId.value,
   authToken: () => token.value || "",
-  collabToken: () => collabTokenFromQuery.value,
-  guestName: () => collabGuestName.value,
+  collabGrant: () => selectedCollabGrant.value,
   getLocalState: () => currentCollabState(),
   applyRemoteState: (state) => applyRemoteCollabState(state)
 });
@@ -374,6 +380,7 @@ function resetItineraryState() {
   collabHistory.value = [];
   collabHistoryLoading.value = false;
   collabError.value = "";
+  collabShareCode.value = "";
   collabShareUrl.value = "";
   collabCreatePending.value = false;
   applyingRemoteCollab.value = false;
@@ -897,15 +904,17 @@ async function loadSelectedItineraryItems() {
     return;
   }
   if (!token.value) {
-    if (isGuestEntry.value) {
-      connectCollabChannel();
-    }
+    collab.disconnect();
     return;
   }
   itineraryLoading.value = true;
   itineraryError.value = "";
   try {
-    const payload = await fetchItineraryItemsWithPoi(selectedItineraryId.value, token.value);
+    const payload = await fetchItineraryItemsWithPoi(
+      selectedItineraryId.value,
+      token.value,
+      selectedCollabGrant.value || undefined
+    );
     baselineItems.value = payload.items;
     draftItems.value = payload.items.map(toDraftItem);
     const firstItem = draftItems.value[0] || null;
@@ -924,7 +933,9 @@ async function loadSelectedItineraryItems() {
     await loadWeather();
     await loadCollabLinksAndHistory();
     connectCollabChannel();
-    collab.pushLocalState(currentCollabState(), "bootstrap");
+    if (canSaveToServer.value) {
+      collab.pushLocalState(currentCollabState(), "bootstrap");
+    }
   } catch (e) {
     baselineItems.value = [];
     draftItems.value = [];
@@ -935,6 +946,7 @@ async function loadSelectedItineraryItems() {
     weatherError.value = "";
     collabLinks.value = [];
     collabHistory.value = [];
+    clearCollabGrant(selectedItineraryId.value);
     collab.disconnect();
     itineraryError.value = e instanceof Error ? e.message : "加载行程地点失败";
   } finally {
@@ -956,7 +968,12 @@ async function loadWeather(forceRefresh = false) {
   weatherLoading.value = true;
   weatherError.value = "";
   try {
-    const payload = await fetchItineraryWeather(selectedItineraryId.value, token.value, forceRefresh);
+    const payload = await fetchItineraryWeather(
+      selectedItineraryId.value,
+      token.value,
+      forceRefresh,
+      selectedCollabGrant.value || undefined
+    );
     weatherItems.value = payload.items;
   } catch (e) {
     weatherItems.value = [];
@@ -968,18 +985,33 @@ async function loadWeather(forceRefresh = false) {
 
 async function loadItineraries() {
   if (!token.value) {
-    if (isGuestEntry.value) {
-      seedGuestWorkspaceItinerary();
-      return;
-    }
     resetItineraryState();
     return;
   }
   itineraryLoading.value = true;
   itineraryError.value = "";
   try {
+    if (typeof route.query.collab_token === "string" && route.query.collab_token.trim()) {
+      itineraryError.value = "协作链接已升级为分享码，请到“加入协作”页面输入分享码后进入。";
+    }
     const payload = await fetchItineraries(token.value);
-    itineraries.value = payload.items;
+    const ownItineraries = payload.items;
+    itineraries.value = ownItineraries;
+
+    const queryItineraryId = typeof route.query.itinerary_id === "string" ? route.query.itinerary_id.trim() : "";
+    if (queryItineraryId && !ownItineraries.some((item) => item.id === queryItineraryId)) {
+      const grantEntry = getCollabGrant(queryItineraryId);
+      if (grantEntry?.grant) {
+        try {
+          const shared = await fetchItineraryById(queryItineraryId, token.value, grantEntry.grant);
+          itineraries.value = [shared, ...ownItineraries];
+        } catch (e) {
+          clearCollabGrant(queryItineraryId);
+          itineraryError.value = e instanceof Error ? e.message : "协作授权已失效，请重新输入分享码";
+        }
+      }
+    }
+
     if (itineraries.value.length === 0) {
       selectedItineraryId.value = "";
       baselineItems.value = [];
@@ -988,7 +1020,6 @@ async function loadItineraries() {
       clearMarkers();
       return;
     }
-    const queryItineraryId = typeof route.query.itinerary_id === "string" ? route.query.itinerary_id.trim() : "";
     const queryExists = queryItineraryId && itineraries.value.some((item) => item.id === queryItineraryId);
     if (queryExists) {
       selectedItineraryId.value = queryItineraryId;
@@ -1040,68 +1071,18 @@ function connectCollabChannel() {
     collab.disconnect();
     return;
   }
-  if (token.value) {
-    collab.connect();
-    return;
-  }
-  if (isGuestEntry.value && collabTokenFromQuery.value && collabGuestName.value) {
+  if (token.value && (canManageCollabLinks.value || Boolean(selectedCollabGrant.value))) {
     collab.connect();
     return;
   }
   collab.disconnect();
 }
 
-function seedGuestWorkspaceItinerary() {
-  const itineraryId = guestItineraryIdFromQuery.value;
-  if (!itineraryId) {
-    return;
-  }
-  if (!itineraries.value.some((item) => item.id === itineraryId)) {
-    const now = new Date().toISOString();
-    itineraries.value = [
-      {
-        id: itineraryId,
-        title: "协作会话",
-        destination: "多人协作",
-        days: 7,
-        creator_user_id: "00000000-0000-0000-0000-000000000000",
-        status: "in_progress",
-        visibility: "private",
-        cover_image_url: null,
-        start_date: null,
-        fork_source_itinerary_id: null,
-        fork_source_author_nickname: null,
-        fork_source_title: null,
-        created_at: now,
-        updated_at: now
-      }
-    ];
-  }
-  selectedItineraryId.value = itineraryId;
-}
-
-async function enterGuestCollabWorkspace() {
-  collabError.value = "";
-  if (!isGuestEntry.value) {
-    return;
-  }
-  if (!guestCollabName.value.trim()) {
-    collabError.value = "请输入访客昵称后再加入协作";
-    return;
-  }
-  seedGuestWorkspaceItinerary();
-  if (!mapReady.value) {
-    await nextTick();
-    await initMap();
-  }
-  await loadPoiCatalog();
-  collab.connect();
-}
-
 async function loadCollabLinksAndHistory() {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
     collabLinks.value = [];
     collabHistory.value = [];
+    collabHistoryLoading.value = false;
     return;
   }
   collabError.value = "";
@@ -1121,16 +1102,17 @@ async function loadCollabLinksAndHistory() {
 }
 
 async function handleCreateCollabLink() {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
     return;
   }
   collabCreatePending.value = true;
   collabError.value = "";
   try {
     const result = await createCollabLink(selectedItineraryId.value, token.value, collabPermissionDraft.value);
+    collabShareCode.value = result.share_code;
     collabShareUrl.value = result.share_url;
-    await navigator.clipboard.writeText(result.share_url);
-    saveSuccess.value = "协作链接已创建并复制到剪贴板";
+    await navigator.clipboard.writeText(result.share_code);
+    saveSuccess.value = "分享码已创建并复制到剪贴板";
     await loadCollabLinksAndHistory();
   } catch (e) {
     collabError.value = e instanceof Error ? e.message : "创建协作链接失败";
@@ -1140,7 +1122,7 @@ async function handleCreateCollabLink() {
 }
 
 async function handleRevokeCollabLink(linkId: string) {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
     return;
   }
   collabError.value = "";
@@ -1153,7 +1135,7 @@ async function handleRevokeCollabLink(linkId: string) {
 }
 
 async function handleToggleCollabLinkPermission(linkId: string, nextPermission: "edit" | "read") {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
     return;
   }
   collabError.value = "";
@@ -1167,19 +1149,21 @@ async function handleToggleCollabLinkPermission(linkId: string, nextPermission: 
   }
 }
 
-async function handleCopyCollabShareUrl(url: string) {
+async function handleCopyCollabShareCode(shareCode: string) {
   try {
-    await navigator.clipboard.writeText(url);
-    saveSuccess.value = "协作链接已复制";
+    await navigator.clipboard.writeText(shareCode);
+    saveSuccess.value = "分享码已复制";
   } catch {
-    collabError.value = "复制失败，请手动复制链接";
+    collabError.value = "复制失败，请手动复制分享码";
   }
 }
 
 async function handleSaveChanges() {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canSaveToServer.value) {
+    saveError.value = "当前协作权限不支持保存到服务器";
     return;
   }
+  const collabGrant = selectedCollabGrant.value || undefined;
   savePending.value = true;
   saveError.value = "";
   saveSuccess.value = "";
@@ -1229,11 +1213,16 @@ async function handleSaveChanges() {
     const deleteIds = [...new Set([...deletedIds, ...movedIds])];
 
     for (const itemId of deleteIds) {
-      await deleteItineraryItem(selectedItineraryId.value, itemId, token.value);
+      await deleteItineraryItem(selectedItineraryId.value, itemId, token.value, collabGrant);
     }
 
     for (const item of createItems) {
-      const created = await createItineraryItem(selectedItineraryId.value, toCreatePayload(item), token.value);
+      const created = await createItineraryItem(
+        selectedItineraryId.value,
+        toCreatePayload(item),
+        token.value,
+        collabGrant
+      );
       if (item.itemId) {
         baselineById.delete(item.itemId);
       }
@@ -1241,7 +1230,13 @@ async function handleSaveChanges() {
     }
 
     for (const entry of updatePayloads) {
-      await updateItineraryItem(selectedItineraryId.value, entry.itemId, entry.payload, token.value);
+      await updateItineraryItem(
+        selectedItineraryId.value,
+        entry.itemId,
+        entry.payload,
+        token.value,
+        collabGrant
+      );
     }
 
     await loadSelectedItineraryItems();
@@ -1261,7 +1256,8 @@ async function handleSaveChanges() {
 }
 
 async function handleSaveStartDate() {
-  if (!token.value || !selectedItineraryId.value) {
+  if (!token.value || !selectedItineraryId.value || !canSaveToServer.value) {
+    saveError.value = "当前协作权限不支持保存开始日期";
     return;
   }
   savePending.value = true;
@@ -1272,7 +1268,8 @@ async function handleSaveStartDate() {
     const updated = await updateItinerary(
       selectedItineraryId.value,
       { start_date: normalized },
-      token.value
+      token.value,
+      selectedCollabGrant.value || undefined
     );
     const target = itineraries.value.find((item) => item.id === selectedItineraryId.value);
     if (target) {
@@ -1300,7 +1297,7 @@ async function handleCancelChanges() {
 }
 
 function openDiscardCurrentItineraryDialog() {
-  if (!selectedItineraryId.value || !selectedItinerary.value) {
+  if (!selectedItineraryId.value || !selectedItinerary.value || !canManageCollabLinks.value) {
     return;
   }
   discardDialogOpen.value = true;
@@ -1311,7 +1308,7 @@ function closeDiscardCurrentItineraryDialog() {
 }
 
 async function handleDiscardCurrentItinerary() {
-  if (!token.value || !selectedItineraryId.value || !selectedItinerary.value) {
+  if (!token.value || !selectedItineraryId.value || !selectedItinerary.value || !canManageCollabLinks.value) {
     return;
   }
   savePending.value = true;
@@ -1363,10 +1360,6 @@ watch(
       await initWorkspace();
       return;
     }
-    if (isGuestEntry.value) {
-      await enterGuestCollabWorkspace();
-      return;
-    }
     destroyMap();
     resetItineraryState();
   }
@@ -1384,9 +1377,9 @@ watch(
 );
 
 watch(
-  () => [token.value, selectedItineraryId.value, collabGuestName.value] as const,
-  ([nextToken, itineraryId, nextGuestName]) => {
-    if ((nextToken && itineraryId) || (isGuestEntry.value && itineraryId && nextGuestName)) {
+  () => [token.value, selectedItineraryId.value, selectedCollabGrant.value] as const,
+  ([nextToken, itineraryId]) => {
+    if (nextToken && itineraryId) {
       connectCollabChannel();
       return;
     }
@@ -1432,11 +1425,6 @@ onMounted(async () => {
   await loadMe();
   if (isLoggedIn.value) {
     await initWorkspace();
-    return;
-  }
-  if (isGuestEntry.value) {
-    seedGuestWorkspaceItinerary();
-    await enterGuestCollabWorkspace();
   }
 });
 
@@ -1479,7 +1467,7 @@ onBeforeUnmount(() => {
     </header>
 
     <section
-      v-if="!isLoggedIn && !isGuestEntry"
+      v-if="!isLoggedIn"
       class="auth-shell"
     >
       <h2>登录 / 注册</h2>
@@ -1541,34 +1529,6 @@ onBeforeUnmount(() => {
       class="workspace"
     >
       <aside class="left-panel">
-        <div
-          v-if="isGuestEntry"
-          class="panel-card"
-        >
-          <h2>访客协作</h2>
-          <p class="subtle">
-            你通过协作链接进入，无需注册。请输入昵称并加入协作会话。
-          </p>
-          <label class="field-label">访客昵称</label>
-          <input
-            v-model="guestCollabName"
-            class="input"
-            placeholder="例如：小李"
-          >
-          <div class="action-row">
-            <button
-              class="btn primary"
-              :disabled="!guestCollabName.trim()"
-              @click="enterGuestCollabWorkspace"
-            >
-              加入协作
-            </button>
-          </div>
-          <p class="subtle">
-            访客模式下可实时协作，但无法直接执行“保存到服务器”操作。
-          </p>
-        </div>
-
         <div class="panel-card">
           <div class="panel-head">
             <h2>行程选择</h2>
@@ -1612,7 +1572,7 @@ onBeforeUnmount(() => {
         <AiPlanGenerator
           :token="token || ''"
           :itinerary-id="selectedItineraryId"
-          :disabled="itineraryLoading || !selectedItineraryId || !token"
+          :disabled="itineraryLoading || !selectedItineraryId || !token || !canManageCollabLinks"
           @imported="handleAiImported"
         />
 
@@ -1657,6 +1617,12 @@ onBeforeUnmount(() => {
             连接状态：{{ collabConnected ? "已连接" : "未连接" }} · 当前权限：{{ collabPermission === "edit" ? "可编辑" : "只读" }}
           </p>
           <p
+            v-if="!canManageCollabLinks"
+            class="subtle"
+          >
+            当前为协作者模式：{{ canSaveToServer ? "可保存到服务器" : "只读协作" }}
+          </p>
+          <p
             v-if="collabError"
             class="error"
           >
@@ -1683,7 +1649,7 @@ onBeforeUnmount(() => {
             <select
               v-model="collabPermissionDraft"
               class="input"
-              :disabled="collabCreatePending || !selectedItineraryId"
+              :disabled="collabCreatePending || !selectedItineraryId || !canManageCollabLinks"
             >
               <option value="edit">
                 新链接默认可编辑
@@ -1694,44 +1660,50 @@ onBeforeUnmount(() => {
             </select>
             <button
               class="btn"
-              :disabled="collabCreatePending || !selectedItineraryId"
+              :disabled="collabCreatePending || !selectedItineraryId || !canManageCollabLinks"
               @click="handleCreateCollabLink"
             >
-              {{ collabCreatePending ? "创建中..." : "创建协作链接" }}
+              {{ collabCreatePending ? "创建中..." : "创建分享码" }}
             </button>
           </div>
           <p
-            v-if="collabShareUrl"
+            v-if="collabShareCode"
             class="hint"
           >
-            最新链接：{{ collabShareUrl }}
+            最新分享码：{{ collabShareCode }}
           </p>
           <button
-            v-if="collabShareUrl"
+            v-if="collabShareCode"
             class="btn ghost"
-            @click="handleCopyCollabShareUrl(collabShareUrl)"
+            @click="handleCopyCollabShareCode(collabShareCode)"
           >
-            重新复制最新链接
+            重新复制最新分享码
           </button>
+          <p
+            v-if="collabShareUrl"
+            class="subtle"
+          >
+            分享链接（可选）：{{ collabShareUrl }}
+          </p>
           <ul class="mini-list">
             <li
               v-for="link in collabLinks"
               :key="link.id"
             >
               <span>
-                {{ link.permission === "edit" ? "编辑" : "只读" }} · {{ link.is_revoked ? "已撤销" : "生效中" }}
+                {{ link.permission === "edit" ? "编辑" : "只读" }} · 码尾 {{ link.share_code_last4 }} · {{ link.is_revoked ? "已撤销" : "生效中" }}
               </span>
               <div class="inline-actions">
                 <button
                   class="btn ghost"
-                  :disabled="link.is_revoked"
+                  :disabled="link.is_revoked || !canManageCollabLinks"
                   @click="handleToggleCollabLinkPermission(link.id, link.permission === 'edit' ? 'read' : 'edit')"
                 >
                   切换权限
                 </button>
                 <button
                   class="btn danger"
-                  :disabled="link.is_revoked"
+                  :disabled="link.is_revoked || !canManageCollabLinks"
                   @click="handleRevokeCollabLink(link.id)"
                 >
                   撤销
@@ -1761,11 +1733,11 @@ onBeforeUnmount(() => {
             v-model="itineraryStartDateDraft"
             class="input"
             type="date"
-            :disabled="savePending || !selectedItineraryId || !token"
+            :disabled="savePending || !selectedItineraryId || !token || !canSaveToServer"
           >
           <button
             class="btn"
-            :disabled="savePending || !selectedItineraryId || !token"
+            :disabled="savePending || !selectedItineraryId || !token || !canSaveToServer"
             @click="handleSaveStartDate"
           >
             保存开始日期
@@ -1773,28 +1745,28 @@ onBeforeUnmount(() => {
           <div class="action-row">
             <button
               class="btn"
-              :disabled="savePending || !isDirty || !selectedItineraryId || !token"
+              :disabled="savePending || !isDirty || !selectedItineraryId || !token || !canSaveToServer"
               @click="handleCancelChanges"
             >
               取消更改
             </button>
             <button
               class="btn primary"
-              :disabled="savePending || !isDirty || !selectedItineraryId || !token"
+              :disabled="savePending || !isDirty || !selectedItineraryId || !token || !canSaveToServer"
               @click="handleSaveChanges"
             >
               {{ savePending ? "保存中..." : "保存更改" }}
             </button>
             <button
               class="btn ghost"
-              :disabled="savePending || !selectedItineraryId || !isForkedItinerary || !token"
+              :disabled="savePending || !selectedItineraryId || !isForkedItinerary || !token || !canManageCollabLinks"
               @click="toggleDiffPanel"
             >
               {{ diffOpen ? "收起修改对比" : "查看修改对比" }}
             </button>
             <button
               class="btn danger"
-              :disabled="savePending || !selectedItineraryId || !token"
+              :disabled="savePending || !selectedItineraryId || !token || !canManageCollabLinks"
               @click="openDiscardCurrentItineraryDialog"
             >
               作废当前行程

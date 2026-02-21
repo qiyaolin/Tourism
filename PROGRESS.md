@@ -423,3 +423,16 @@
   - 变更：修复前端容器依赖漂移导致的 `Failed to resolve import "yjs"`，在 `frontend` 服务启动命令增加 `pnpm install --frozen-lockfile=false` 自愈步骤，保证挂载 `node_modules` 与锁文件变更后自动同步依赖。
   - 结论：容器依赖与在线产物已命中 `yjs` 预构建模块，`useYjsCollab.ts` 导入解析恢复正常。
   - 风险：用户浏览器若仍持有旧标签页缓存，可能继续看到旧错误；复测前需关闭旧标签页后重新打开页面。
+
+## Session Update (2026-02-21 Phase 2.6 Share Code Entry + Collaborator Save Permission)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-003 | Phase 2.6 | 协作入口重构（仅分享码）+ 登录协作者可保存 | test_passed | codex | 2026-02-21T10:25:00-05:00 | `backend/app/services/collab_service.py`, `backend/app/api/v1/collab.py`, `backend/app/api/v1/itinerary_collab.py`, `backend/app/api/v1/itineraries.py`, `backend/app/api/v1/weather.py`, `backend/app/services/itinerary_service.py`, `backend/app/services/weather_service.py`, `backend/app/models/itinerary_collab.py`, `backend/app/schemas/itinerary_collab.py`, `backend/app/core/config.py`, `backend/.env.example`, `backend/alembic/versions/20260221_0013_add_collab_share_code_columns.py`, `backend/tests/test_collab_service.py`, `frontend/src/api.ts`, `frontend/src/composables/useAuth.ts`, `frontend/src/composables/useYjsCollab.ts`, `frontend/src/router.ts`, `frontend/src/App.vue`, `frontend/src/pages/CollabJoinPage.vue`, `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 ...`(本次改动文件)=passed；`uv run --project backend pytest -q backend/tests/test_collab_service.py backend/tests/test_weather_service.py backend/tests/test_itinerary_items_with_poi.py`=9 passed；`pnpm --dir frontend lint`=passed(0 error, warnings only)；`pnpm --dir frontend build`=passed；`uv run alembic upgrade head && uv run alembic current`=`20260221_0013(head)`；接口与权限语义已切换为分享码解析 `POST /api/v1/collab/code/resolve` + `X-Collab-Grant` 协作者写入控制 | 待用户执行运行态验收（双账号输入分享码加入、编辑权限保存、只读权限拦截） | 用户关闭旧标签页后重新打开页面，执行“创建分享码 -> 账号B输入分享码 -> 编辑并保存 -> 切只读后保存被拒绝”的端到端验收 |
+
+### Changelog Addendum
+
+- 2026-02-21T10:25:00-05:00
+  - 变更：协作入口从 URL `collab_token` 主链路升级为“分享码输入”主链路，新增 `/collab/join` 页面与后端解析接口 `POST /api/v1/collab/code/resolve`，解析成功后签发短时 `collab_grant`；编辑器读写请求统一支持 `X-Collab-Grant`。
+  - 结论：登录协作者在 `edit` 权限下可直接保存到服务器，`read` 权限只读；所有者仍保留链接管理/作废行程等高权限动作。
+  - 风险：当前保留了 WebSocket 侧 `collab_token` 的兼容分支用于过渡；后续稳定后可按治理策略删除该兼容路径。

@@ -78,8 +78,8 @@ def list_collab_history_api(
 async def itinerary_collab_ws_api(websocket: WebSocket, itinerary_id: UUID) -> None:
     await websocket.accept()
     auth_token = websocket.query_params.get("token")
+    collab_grant = websocket.query_params.get("collab_grant")
     collab_token = websocket.query_params.get("collab_token")
-    guest_name = websocket.query_params.get("guest_name")
 
     session_row = None
     conn = None
@@ -91,8 +91,8 @@ async def itinerary_collab_ws_api(websocket: WebSocket, itinerary_id: UUID) -> N
                 db,
                 itinerary_id,
                 auth_token=auth_token,
+                collab_grant=collab_grant,
                 collab_token=collab_token,
-                guest_name=guest_name,
             )
         except HTTPException as exc:
             await websocket.send_json({"type": "collab:error", "message": str(exc.detail)})

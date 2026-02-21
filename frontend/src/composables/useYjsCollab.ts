@@ -11,8 +11,7 @@ type CollabState = {
 type UseYjsCollabOptions = {
   itineraryId: () => string;
   authToken: () => string;
-  collabToken: () => string;
-  guestName: () => string;
+  collabGrant: () => string;
   getLocalState: () => CollabState;
   applyRemoteState: (state: CollabState) => void;
 };
@@ -132,19 +131,15 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
     disconnect();
 
     const token = options.authToken();
-    const collabToken = options.collabToken();
-    const guestName = options.guestName();
+    const collabGrant = options.collabGrant();
     const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1$/, "");
     const wsBase = apiBase.replace(/^http/, "ws");
     const url = new URL(`${wsBase}/api/v1/itineraries/${itineraryId}/collab/ws`);
     if (token) {
       url.searchParams.set("token", token);
     }
-    if (collabToken) {
-      url.searchParams.set("collab_token", collabToken);
-    }
-    if (guestName) {
-      url.searchParams.set("guest_name", guestName);
+    if (collabGrant) {
+      url.searchParams.set("collab_grant", collabGrant);
     }
 
     ws.value = new WebSocket(url.toString());
