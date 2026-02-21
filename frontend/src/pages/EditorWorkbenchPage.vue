@@ -150,6 +150,24 @@ const collabParticipants = collab.participants;
 const collabPermission = collab.permission;
 const collabConnected = collab.connected;
 const collabWsError = collab.error;
+const meaningfulCollabHistory = computed(() =>
+  collabHistory.value.filter((item) => {
+    if (item.event_type !== "content_sync" && item.event_type !== "y_update") {
+      return false;
+    }
+    const payload = item.payload || {};
+    const originFromMeta =
+      payload &&
+      typeof payload === "object" &&
+      payload.meta &&
+      typeof payload.meta === "object" &&
+      typeof (payload.meta as { origin?: unknown }).origin === "string"
+        ? String((payload.meta as { origin?: unknown }).origin)
+        : "";
+    const origin = originFromMeta || (typeof payload.origin === "string" ? payload.origin : "");
+    return origin !== "bootstrap" && origin !== "seed";
+  })
+);
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let collabSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1158,6 +1176,36 @@ async function handleCopyCollabShareCode(shareCode: string) {
   }
 }
 
+function resolveHistoryActorLabel(item: CollabHistoryItem): string {
+  if (item.actor_user_id && user.value?.id && item.actor_user_id === user.value.id) {
+    return "你";
+  }
+  if (item.actor_type === "guest") {
+    return item.guest_name || "访客";
+  }
+  return "协作者";
+}
+
+function resolveHistoryActionLabel(item: CollabHistoryItem): string {
+  const payload = item.payload || {};
+  const originFromMeta =
+    payload &&
+    typeof payload === "object" &&
+    payload.meta &&
+    typeof payload.meta === "object" &&
+    typeof (payload.meta as { origin?: unknown }).origin === "string"
+      ? String((payload.meta as { origin?: unknown }).origin)
+      : "";
+  const origin = originFromMeta || (typeof payload.origin === "string" ? payload.origin : "");
+  if (origin === "start-date") {
+    return "更新了开始日期";
+  }
+  if (origin === "draft-items") {
+    return "更新了时间轴内容";
+  }
+  return "编辑了协作内容";
+}
+
 async function handleSaveChanges() {
   if (!token.value || !selectedItineraryId.value || !canSaveToServer.value) {
     saveError.value = "当前协作权限不支持保存到服务器";
@@ -1691,19 +1739,19 @@ onBeforeUnmount(() => {
               :key="link.id"
             >
               <span>
-                {{ link.permission === "edit" ? "编辑" : "只读" }} · 码尾 {{ link.share_code_last4 }} · {{ link.is_revoked ? "已撤销" : "生效中" }}
+                {{ link.permission === "edit" ? "编辑" : "只读" }} · 码尾 {{ link.share_code_last4 }}
               </span>
               <div class="inline-actions">
                 <button
                   class="btn ghost"
-                  :disabled="link.is_revoked || !canManageCollabLinks"
+                  :disabled="!canManageCollabLinks"
                   @click="handleToggleCollabLinkPermission(link.id, link.permission === 'edit' ? 'read' : 'edit')"
                 >
                   切换权限
                 </button>
                 <button
                   class="btn danger"
-                  :disabled="link.is_revoked || !canManageCollabLinks"
+                  :disabled="!canManageCollabLinks"
                   @click="handleRevokeCollabLink(link.id)"
                 >
                   撤销
@@ -1722,10 +1770,10 @@ onBeforeUnmount(() => {
           </p>
           <ul class="mini-list">
             <li
-              v-for="item in collabHistory"
+              v-for="item in meaningfulCollabHistory"
               :key="item.id"
             >
-              {{ item.event_type }} · {{ item.actor_type === "guest" ? item.guest_name : item.actor_type }} · {{ new Date(item.created_at).toLocaleTimeString() }}
+              {{ resolveHistoryActorLabel(item) }} {{ resolveHistoryActionLabel(item) }} · {{ new Date(item.created_at).toLocaleTimeString() }}
             </li>
           </ul>
           <label class="field-label">开始日期（天气映射基准）</label>

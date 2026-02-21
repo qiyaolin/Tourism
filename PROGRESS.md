@@ -449,3 +449,16 @@
   - 变更：`useYjsCollab` 新增连接幂等保护（同参数不重复重连）与在线协作者去重（按 `participant_user_id` 优先）；后端协作历史默认过滤 `join/leave`，并补充 `share_code_created/link_permission_changed/share_code_revoked/content_sync` 事件语义。
   - 结论：重复重连导致的在线人数累增与历史噪声问题已在代码层修复。
   - 风险：历史过滤规则当前是后端默认策略；若后续需要审计级全量事件，可新增带参数的“含 presence 事件”查询接口。
+
+## Session Update (2026-02-21 Phase 2.6 Collaboration UX Refinement)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-005 | Phase 2.6 | 协作展示优化（撤销码不显示 + 历史仅内容编辑） | test_passed | codex | 2026-02-21T11:28:00-05:00 | `backend/app/services/collab_service.py`, `backend/app/services/collab_runtime.py`, `backend/app/schemas/itinerary_collab.py`, `frontend/src/api.ts`, `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/services/collab_service.py backend/app/services/collab_runtime.py backend/app/schemas/itinerary_collab.py`=passed；`uv run --project backend pytest -q backend/tests/test_collab_service.py`=3 passed；`pnpm --dir frontend build`=passed | 待用户运行态复测 | 用户关闭旧标签页后重新打开页面，验证“撤销后分享码即时消失 + 协作历史仅显示内容编辑语义文案” |
+
+### Changelog Addendum
+
+- 2026-02-21T11:28:00-05:00
+  - 变更：协作链接列表改为仅返回未撤销分享码（撤销后不再显示）；协作历史改为仅保留 `content_sync` 内容编辑事件，并过滤 `bootstrap/seed` 初始化同步；前端历史文案改为“谁在何时改了什么”（时间轴/开始日期/协作内容）用户可读表达。
+  - 结论：协作面板信息密度从“系统噪声”收敛到“用户决策相关”。
+  - 风险：内容编辑事件目前按刷新批次聚合展示，如需审计级逐条明细可后续增加“详细模式”开关。

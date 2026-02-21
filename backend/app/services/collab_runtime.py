@@ -246,6 +246,7 @@ class CollabRuntime:
 
             applied = 0
             last_update_bytes: bytes | None = None
+            grouped_events: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
             for payload in parsed_items:
                 update_b64 = payload.get("update_b64")
                 if not isinstance(update_b64, str) or not update_b64.strip():
@@ -255,25 +256,67 @@ class CollabRuntime:
                 except ValueError:
                     continue
                 last_update_bytes = update_bytes
+                actor_type = str(payload.get("participant_type") or "system")
+                actor_user_id_raw = payload.get("actor_user_id")
+                actor_user_id = None
+                if isinstance(actor_user_id_raw, str) and actor_user_id_raw:
+                    try:
+                        actor_user_id = str(UUID(actor_user_id_raw))
+                    except ValueError:
+                        actor_user_id = None
+                guest_name = payload.get("guest_name")
+                guest_value = guest_name if isinstance(guest_name, str) else None
+                meta = payload.get("meta")
+                origin = ""
+                if isinstance(meta, dict):
+                    maybe_origin = meta.get("origin")
+                    if isinstance(maybe_origin, str):
+                        origin = maybe_origin.strip()
+                if not origin:
+                    origin = "local"
+                if origin in {"bootstrap", "seed"}:
+                    applied += 1
+                    continue
+                group_key = (actor_type, actor_user_id, guest_value)
+                group = grouped_events.setdefault(
+                    group_key,
+                    {"bytes": 0, "updates": 0, "origin_counts": {}, "session_ids": set()},
+                )
+                group["bytes"] += len(update_bytes)
+                group["updates"] += 1
+                origin_counts = group["origin_counts"]
+                origin_counts[origin] = int(origin_counts.get(origin, 0)) + 1
+                session_id = payload.get("session_id")
+                if isinstance(session_id, str) and session_id:
+                    group["session_ids"].add(session_id)
+                applied += 1
+
+            for (actor_type, actor_user_id_raw, guest_name), aggregate in grouped_events.items():
+                actor_user_id = UUID(actor_user_id_raw) if actor_user_id_raw else None
+                session_ids = sorted(list(aggregate["session_ids"]))
                 db.add(
                     ItineraryCollabEventLog(
                         itinerary_id=itinerary_id,
-                        actor_type=str(payload.get("participant_type") or "system"),
-                        actor_user_id=(
-                            UUID(payload["actor_user_id"]) if payload.get("actor_user_id") else None
-                        ),
-                        guest_name=payload.get("guest_name"),
+                        actor_type=actor_type,
+                        actor_user_id=actor_user_id,
+                        guest_name=guest_name,
                         event_type="content_sync",
                         target_type="document",
                         target_id=str(itinerary_id),
                         payload={
-                            "session_id": payload.get("session_id"),
-                            "bytes": len(update_bytes),
-                            "meta": payload.get("meta") or {},
+                            "bytes": int(aggregate["bytes"]),
+                            "updates": int(aggregate["updates"]),
+                            "origin_counts": aggregate["origin_counts"],
+                            "origin": max(
+                                aggregate["origin_counts"].items(),
+                                key=lambda item: item[1],
+                            )[0]
+                            if aggregate["origin_counts"]
+                            else "local",
+                            "session_ids": session_ids,
                         },
                     )
                 )
-                applied += 1
 
             if applied > 0:
                 doc_row.state_update = last_update_bytes

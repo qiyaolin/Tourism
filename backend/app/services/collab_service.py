@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -295,7 +295,10 @@ def list_collab_links(
     _ensure_itinerary_owner(db, itinerary_id, current_user)
     rows = db.scalars(
         select(ItineraryCollabLink)
-        .where(ItineraryCollabLink.itinerary_id == itinerary_id)
+        .where(
+            ItineraryCollabLink.itinerary_id == itinerary_id,
+            ItineraryCollabLink.is_revoked.is_(False),
+        )
         .order_by(ItineraryCollabLink.created_at.desc())
     ).all()
     return ItineraryCollabLinkListResponse(items=[_link_to_response(row) for row in rows])
@@ -359,12 +362,27 @@ def list_collab_history(
     _ensure_itinerary_owner(db, itinerary_id, current_user)
     base = select(ItineraryCollabEventLog).where(
         ItineraryCollabEventLog.itinerary_id == itinerary_id,
-        ItineraryCollabEventLog.event_type.notin_(("join", "leave")),
+        ItineraryCollabEventLog.event_type.in_(("content_sync", "y_update")),
     )
-    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
-    rows = db.scalars(
-        base.order_by(ItineraryCollabEventLog.created_at.desc()).offset(offset).limit(limit)
-    ).all()
+    rows = db.scalars(base.order_by(ItineraryCollabEventLog.created_at.desc())).all()
+    meaningful_rows = []
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        meta = payload.get("meta")
+        origin = ""
+        if isinstance(meta, dict):
+            maybe_origin = meta.get("origin")
+            if isinstance(maybe_origin, str):
+                origin = maybe_origin.strip()
+        if not origin:
+            maybe_origin = payload.get("origin")
+            if isinstance(maybe_origin, str):
+                origin = maybe_origin.strip()
+        if origin in {"bootstrap", "seed"}:
+            continue
+        meaningful_rows.append(row)
+    total = len(meaningful_rows)
+    page_rows = meaningful_rows[offset : offset + limit]
     return ItineraryCollabHistoryListResponse(
         items=[
             ItineraryCollabHistoryItem(
@@ -379,7 +397,7 @@ def list_collab_history(
                 payload=row.payload,
                 created_at=row.created_at,
             )
-            for row in rows
+            for row in page_rows
         ],
         total=total,
         offset=offset,
