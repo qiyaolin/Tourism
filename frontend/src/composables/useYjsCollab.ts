@@ -65,6 +65,25 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
 
   let suppressLocalEmit = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let connectKey = "";
+
+  function normalizeParticipants(items: CollabParticipant[]): CollabParticipant[] {
+    const dedup = new Map<string, CollabParticipant>();
+    for (const item of items) {
+      const key = item.participant_user_id
+        ? `user:${item.participant_user_id}`
+        : `session:${item.session_id}`;
+      const existed = dedup.get(key);
+      if (!existed) {
+        dedup.set(key, item);
+        continue;
+      }
+      if (Date.parse(item.joined_at) >= Date.parse(existed.joined_at)) {
+        dedup.set(key, item);
+      }
+    }
+    return [...dedup.values()].sort((a, b) => Date.parse(a.joined_at) - Date.parse(b.joined_at));
+  }
 
   function extractStateFromDoc(): CollabState {
     const startDate = root.get("start_date");
@@ -108,6 +127,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
   }
 
   function disconnect() {
+    connectKey = "";
     connected.value = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -128,10 +148,18 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
     if (!itineraryId) {
       return;
     }
-    disconnect();
-
     const token = options.authToken();
     const collabGrant = options.collabGrant();
+    const nextKey = `${itineraryId}::${token}::${collabGrant}`;
+    if (
+      ws.value &&
+      connectKey === nextKey &&
+      (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    disconnect();
+    connectKey = nextKey;
     const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1$/, "");
     const wsBase = apiBase.replace(/^http/, "ws");
     const url = new URL(`${wsBase}/api/v1/itineraries/${itineraryId}/collab/ws`);
@@ -173,7 +201,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
       if (type === "collab:joined") {
         const joined = payload as JoinedPayload;
         permission.value = joined.permission;
-        participants.value = joined.participants || [];
+        participants.value = normalizeParticipants(joined.participants || []);
         if (joined.snapshot_update_b64) {
           Y.applyUpdate(ydoc, base64ToBytes(joined.snapshot_update_b64), "remote");
         }
@@ -187,7 +215,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
       }
       if (type === "collab:presence") {
         const presence = payload as PresencePayload;
-        participants.value = presence.participants || [];
+        participants.value = normalizeParticipants(presence.participants || []);
         return;
       }
       if (type === "collab:update") {

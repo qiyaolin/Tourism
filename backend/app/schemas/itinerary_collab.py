@@ -58,6 +58,7 @@ class ItineraryCollabHistoryListResponse(BaseModel):
 class ItineraryCollabParticipant(BaseModel):
     session_id: str
     participant_type: Literal["user", "guest"]
+    participant_user_id: UUID | None = None
     display_name: str
     permission: Literal["edit", "read"]
     joined_at: datetime

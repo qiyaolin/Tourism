@@ -232,6 +232,21 @@ def create_collab_link(
         created_by_user_id=current_user.id,
     )
     db.add(row)
+    db.add(
+        ItineraryCollabEventLog(
+            itinerary_id=itinerary_id,
+            actor_type="user",
+            actor_user_id=current_user.id,
+            guest_name=None,
+            event_type="share_code_created",
+            target_type="collab_link",
+            target_id=str(row.id),
+            payload={
+                "permission": row.permission,
+                "share_code_last4": row.share_code_last4,
+            },
+        )
+    )
     db.commit()
     db.refresh(row)
 
@@ -297,11 +312,37 @@ def update_collab_link(
     row = db.get(ItineraryCollabLink, link_id)
     if row is None or row.itinerary_id != itinerary_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collab link not found")
+    old_permission = row.permission
     if payload.permission is not None:
         row.permission = payload.permission
+    if old_permission != row.permission:
+        db.add(
+            ItineraryCollabEventLog(
+                itinerary_id=itinerary_id,
+                actor_type="user",
+                actor_user_id=current_user.id,
+                guest_name=None,
+                event_type="link_permission_changed",
+                target_type="collab_link",
+                target_id=str(row.id),
+                payload={"from": old_permission, "to": row.permission},
+            )
+        )
     if payload.revoke is True and not row.is_revoked:
         row.is_revoked = True
         row.revoked_at = datetime.now(UTC)
+        db.add(
+            ItineraryCollabEventLog(
+                itinerary_id=itinerary_id,
+                actor_type="user",
+                actor_user_id=current_user.id,
+                guest_name=None,
+                event_type="share_code_revoked",
+                target_type="collab_link",
+                target_id=str(row.id),
+                payload={"share_code_last4": row.share_code_last4},
+            )
+        )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -317,7 +358,8 @@ def list_collab_history(
 ) -> ItineraryCollabHistoryListResponse:
     _ensure_itinerary_owner(db, itinerary_id, current_user)
     base = select(ItineraryCollabEventLog).where(
-        ItineraryCollabEventLog.itinerary_id == itinerary_id
+        ItineraryCollabEventLog.itinerary_id == itinerary_id,
+        ItineraryCollabEventLog.event_type.notin_(("join", "leave")),
     )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.scalars(

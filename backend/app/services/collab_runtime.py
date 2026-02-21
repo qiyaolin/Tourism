@@ -153,6 +153,7 @@ class CollabRuntime:
             ItineraryCollabParticipant(
                 session_id=conn.connection_id,
                 participant_type=conn.identity.participant_type,
+                participant_user_id=conn.identity.actor_user_id,
                 display_name=conn.identity.display_name,
                 permission=conn.identity.permission,
                 joined_at=conn.joined_at,
@@ -262,7 +263,7 @@ class CollabRuntime:
                             UUID(payload["actor_user_id"]) if payload.get("actor_user_id") else None
                         ),
                         guest_name=payload.get("guest_name"),
-                        event_type="y_update",
+                        event_type="content_sync",
                         target_type="document",
                         target_id=str(itinerary_id),
                         payload={

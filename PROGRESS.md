@@ -436,3 +436,16 @@
   - 变更：协作入口从 URL `collab_token` 主链路升级为“分享码输入”主链路，新增 `/collab/join` 页面与后端解析接口 `POST /api/v1/collab/code/resolve`，解析成功后签发短时 `collab_grant`；编辑器读写请求统一支持 `X-Collab-Grant`。
   - 结论：登录协作者在 `edit` 权限下可直接保存到服务器，`read` 权限只读；所有者仍保留链接管理/作废行程等高权限动作。
   - 风险：当前保留了 WebSocket 侧 `collab_token` 的兼容分支用于过渡；后续稳定后可按治理策略删除该兼容路径。
+
+## Session Update (2026-02-21 Phase 2.6 Collaboration Stability Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-004 | Phase 2.6 | 协作稳定性修复（在线人数重复增长 + 历史噪声事件） | test_passed | codex | 2026-02-21T11:05:00-05:00 | `frontend/src/composables/useYjsCollab.ts`, `frontend/src/api.ts`, `backend/app/services/collab_service.py`, `backend/app/services/collab_runtime.py`, `backend/app/schemas/itinerary_collab.py`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/services/collab_service.py backend/app/services/collab_runtime.py backend/app/schemas/itinerary_collab.py`=passed；`uv run --project backend pytest -q backend/tests/test_collab_service.py`=3 passed；`pnpm --dir frontend build`=passed | 待用户运行态复测 | 用户关闭旧标签页后重新打开，执行双账号协作，确认在线协作者数量不再持续增长且历史不再刷屏 `join/leave` |
+
+### Changelog Addendum
+
+- 2026-02-21T11:05:00-05:00
+  - 变更：`useYjsCollab` 新增连接幂等保护（同参数不重复重连）与在线协作者去重（按 `participant_user_id` 优先）；后端协作历史默认过滤 `join/leave`，并补充 `share_code_created/link_permission_changed/share_code_revoked/content_sync` 事件语义。
+  - 结论：重复重连导致的在线人数累增与历史噪声问题已在代码层修复。
+  - 风险：历史过滤规则当前是后端默认策略；若后续需要审计级全量事件，可新增带参数的“含 presence 事件”查询接口。

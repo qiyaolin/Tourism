@@ -309,6 +309,7 @@ export type CollabHistoryListResponse = {
 export type CollabParticipant = {
   session_id: string;
   participant_type: "user" | "guest";
+  participant_user_id: string | null;
   display_name: string;
   permission: "edit" | "read";
   joined_at: string;
