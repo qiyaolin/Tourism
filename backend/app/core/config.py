@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     storage_provider: str = "local"
     storage_local_root: str = "uploads"
     storage_public_base_url: str = "/uploads"
+    collab_token_secret: str = "replace-with-dev-collab-secret"
+    collab_share_base_url: str = "http://localhost:5173/editor"
+    collab_redis_url: str = "redis://localhost:6379/2"
+    collab_flush_interval_seconds: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

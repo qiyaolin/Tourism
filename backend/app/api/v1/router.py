@@ -5,6 +5,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.explore import router as explore_router
 from app.api.v1.health import router as health_router
 from app.api.v1.itineraries import router as itineraries_router
+from app.api.v1.itinerary_collab import router as itinerary_collab_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.poi_corrections import router as poi_corrections_router
 from app.api.v1.pois import router as pois_router
@@ -18,5 +19,6 @@ api_router.include_router(pois_router)
 api_router.include_router(poi_corrections_router)
 api_router.include_router(notifications_router)
 api_router.include_router(itineraries_router)
+api_router.include_router(itinerary_collab_router)
 api_router.include_router(weather_router)
 api_router.include_router(ai_engine_router)

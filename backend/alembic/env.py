@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
 from app.models import (  # noqa: F401
     itinerary,
+    itinerary_collab,
     itinerary_diff_action,
     itinerary_fork,
     itinerary_item,
@@ -35,7 +36,9 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True, compare_type=True)
+    context.configure(
+        url=url, target_metadata=target_metadata, literal_binds=True, compare_type=True
+    )
     with context.begin_transaction():
         context.run_migrations()
 

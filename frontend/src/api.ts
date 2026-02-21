@@ -265,6 +265,55 @@ export type MarkAllNotificationsReadResponse = {
   updated_count: number;
 };
 
+export type CollabLinkResponse = {
+  id: string;
+  itinerary_id: string;
+  permission: "edit" | "read";
+  is_revoked: boolean;
+  created_by_user_id: string;
+  created_at: string;
+  revoked_at: string | null;
+};
+
+export type CollabLinkCreateResponse = {
+  link: CollabLinkResponse;
+  token: string;
+  share_url: string;
+};
+
+export type CollabLinkListResponse = {
+  items: CollabLinkResponse[];
+};
+
+export type CollabHistoryItem = {
+  id: string;
+  itinerary_id: string;
+  actor_type: "system" | "user" | "guest";
+  actor_user_id: string | null;
+  guest_name: string | null;
+  event_type: string;
+  target_type: string | null;
+  target_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type CollabHistoryListResponse = {
+  items: CollabHistoryItem[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type CollabParticipant = {
+  session_id: string;
+  participant_type: "user" | "guest";
+  display_name: string;
+  permission: "edit" | "read";
+  joined_at: string;
+  cursor: Record<string, unknown> | null;
+};
+
 
 export type PoiListResponse = {
   items: PoiResponse[];
@@ -669,6 +718,61 @@ export async function markAllNotificationsRead(token: string): Promise<MarkAllNo
     headers: authHeaders(token)
   });
   return parseJsonResponse<MarkAllNotificationsReadResponse>(response, "Mark all notifications read request");
+}
+
+export async function createCollabLink(
+  itineraryId: string,
+  token: string,
+  permission: "edit" | "read" = "edit"
+): Promise<CollabLinkCreateResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/collab/links`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ permission })
+  });
+  return parseJsonResponse<CollabLinkCreateResponse>(response, "Create collab link request");
+}
+
+export async function fetchCollabLinks(itineraryId: string, token: string): Promise<CollabLinkListResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/collab/links`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<CollabLinkListResponse>(response, "List collab links request");
+}
+
+export async function updateCollabLink(
+  itineraryId: string,
+  linkId: string,
+  token: string,
+  payload: { permission?: "edit" | "read"; revoke?: boolean }
+): Promise<CollabLinkResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/collab/links/${linkId}`, {
+    method: "PATCH",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<CollabLinkResponse>(response, "Update collab link request");
+}
+
+export async function fetchCollabHistory(
+  itineraryId: string,
+  token: string,
+  offset = 0,
+  limit = 50
+): Promise<CollabHistoryListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/itineraries/${itineraryId}/collab/history?offset=${offset}&limit=${limit}`,
+    {
+      headers: authHeaders(token)
+    }
+  );
+  return parseJsonResponse<CollabHistoryListResponse>(response, "List collab history request");
 }
 
 export async function fetchItineraryItemsWithPoi(

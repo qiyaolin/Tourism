@@ -4,7 +4,7 @@
 
 - project: `Project Atlas`
 - last_session_summary: `用户已确认第 1、2 步运行态验收成功，并指示将 Phase 1.9 暂时标记为完成。`
-- current_focus: `Web 端优先：Phase 2.5（天气集成 P1）已收口，进入下一阶段需求评审与任务拆分`
+- current_focus: `Web 端优先：Phase 2.6（多人协作 CRDT/Yjs）开发与自动化验证已完成，待用户运行态验收`
 - global_blockers: `无`
 - next_session_bootstrap:
   - `读取本文件并输出：当前阶段/当前任务/阻塞项/下一步动作`
@@ -393,3 +393,33 @@
   - 变更：根据用户确认“天气系统已手工测试可正常运行”，执行 Phase 2.5 收口更新。
   - 结论：P2-2.5-001/002/003 已统一为 done，Phase 2.5 收口完成。
   - 风险：无新增 P0 阻塞。
+
+## Session Update (2026-02-20 Phase 2.6 Collaboration CRDT/Yjs)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-001 | Phase 2.6 | 多人协作 P1+P2（CRDT/Yjs + 协作链接 + WebSocket + 编辑历史） | test_passed | codex | 2026-02-20T20:35:00-05:00 | `backend/app/models/itinerary_collab.py`, `backend/alembic/versions/20260220_0012_create_itinerary_collab_tables.py`, `backend/app/schemas/itinerary_collab.py`, `backend/app/services/collab_service.py`, `backend/app/services/collab_runtime.py`, `backend/app/api/v1/itinerary_collab.py`, `backend/app/api/v1/router.py`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/.env.example`, `backend/pyproject.toml`, `backend/uv.lock`, `frontend/src/composables/useYjsCollab.ts`, `frontend/src/api.ts`, `frontend/src/pages/EditorWorkbenchPage.vue`, `frontend/src/styles.css`, `frontend/package.json`, `frontend/pnpm-lock.yaml`, `PROGRESS.md` | `uv lock`=passed；`pnpm install --lockfile-only`=passed；`uv run ruff check ...`(2.6 相关文件)=passed；`uv run pytest -q`=29 passed；`pnpm lint`=passed(0 error, warnings only)；`pnpm build`=passed；容器迁移验证：`docker compose -f infra/docker-compose.yml exec backend alembic upgrade head && alembic current`=`20260220_0012(head)`；容器重建同步：`docker compose -f infra/docker-compose.yml up -d --build backend frontend`=done；在线源码特征：`http://localhost:5173/src/pages/EditorWorkbenchPage.vue` 命中 `useYjsCollab/collabConnected`；运行态接口联调：登录->`POST /itineraries/{id}/collab/links`=200，返回 `share_url`；WebSocket 联调：连接 `/collab/ws` 收到 `collab:joined` 与 `collab:pong` | 待用户执行双端浏览器并发编辑验收（关闭旧标签页后重新打开） | 用户执行“同一行程双端并发编辑 + 链接访客加入 + 权限切换 + 历史可见”运行态验收后，可将状态推进为 `done` |
+
+### Changelog Addendum
+
+- 2026-02-20T20:35:00-05:00
+  - 变更：新增协作域数据模型（协作链接/在线会话/文档快照/事件日志），新增协作 API（链接创建、列表、权限切换、撤销、历史查询）与 WebSocket 通道（`collab:joined/presence/update/ping`）；前端新增 `useYjsCollab`，编辑器接入实时协作状态、协作链接面板、在线协作者展示与协作历史列表。
+  - 结论：Phase 2.6 代码与自动化门禁通过，容器迁移与在线产物同步完成；当前状态为 `test_passed`，待用户运行态并发验收。
+  - 风险：当前桥接模式采用“客户端发送完整 Yjs 文档快照”以规避本机 `y-py` 构建阻塞，网络开销高于增量更新；后续可在构建环境稳定后升级为服务端增量合并。
+- 2026-02-20T20:48:00-05:00
+  - 变更：补充“双模式并行”链路复验：登录用户创建协作链接后，访客以 `collab_token + guest_name` 无需注册直连 `/collab/ws`，服务端返回 `collab:joined` 且权限字段正确。
+  - 结论：访客免注册接入链路可用，满足 Phase 2.6 双模式后端目标。
+  - 风险：访客模式在前端不支持“保存到服务器”按钮，仅支持实时协作态同步，符合当前最小可用策略。
+
+## Session Update (2026-02-20 Phase 2.6 Runtime Dependency Sync Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-002 | Phase 2.6 | 协作前端运行态依赖同步修复（`yjs` 解析失败） | done | codex | 2026-02-20T20:58:39-05:00 | `infra/docker-compose.yml`, `PROGRESS.md` | `docker compose -f infra/docker-compose.yml exec frontend sh -lc "ls -l /app/node_modules/yjs/package.json"` 命中 `yjs`；`docker compose -f infra/docker-compose.yml logs frontend --since 10m` 启动正常且无 `Failed to resolve import`；在线产物核验 `http://localhost:5173/src/composables/useYjsCollab.ts` 返回 200 且命中 `/node_modules/.vite/deps/yjs.js`；`http://localhost:5173/src/pages/EditorWorkbenchPage.vue` 返回 200 且页面模块可正常解析 | 无 | 请用户关闭旧标签页后重新打开页面，执行 Phase 2.6 双端并发编辑运行态验收 |
+
+### Changelog Addendum
+
+- 2026-02-20T20:58:39-05:00
+  - 变更：修复前端容器依赖漂移导致的 `Failed to resolve import "yjs"`，在 `frontend` 服务启动命令增加 `pnpm install --frozen-lockfile=false` 自愈步骤，保证挂载 `node_modules` 与锁文件变更后自动同步依赖。
+  - 结论：容器依赖与在线产物已命中 `yjs` 预构建模块，`useYjsCollab.ts` 导入解析恢复正常。
+  - 风险：用户浏览器若仍持有旧标签页缓存，可能继续看到旧错误；复测前需关闭旧标签页后重新打开页面。

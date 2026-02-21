@@ -1,4 +1,10 @@
 from app.models.itinerary import Itinerary
+from app.models.itinerary_collab import (
+    ItineraryCollabDocument,
+    ItineraryCollabEventLog,
+    ItineraryCollabLink,
+    ItineraryCollabSession,
+)
 from app.models.itinerary_diff_action import ItineraryDiffAction
 from app.models.itinerary_fork import ItineraryFork
 from app.models.itinerary_item import ItineraryItem
@@ -18,6 +24,10 @@ __all__ = [
     "VerificationCode",
     "Poi",
     "Itinerary",
+    "ItineraryCollabLink",
+    "ItineraryCollabSession",
+    "ItineraryCollabDocument",
+    "ItineraryCollabEventLog",
     "ItineraryItem",
     "ItinerarySnapshot",
     "ItineraryFork",

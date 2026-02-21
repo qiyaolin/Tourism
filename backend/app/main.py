@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.services.collab_runtime import get_collab_runtime
 
 settings = get_settings()
 
@@ -27,3 +28,13 @@ if settings.storage_provider == "local":
         StaticFiles(directory=settings.storage_local_root),
         name="uploads",
     )
+
+
+@app.on_event("startup")
+async def _startup_collab_runtime() -> None:
+    await get_collab_runtime().startup()
+
+
+@app.on_event("shutdown")
+async def _shutdown_collab_runtime() -> None:
+    await get_collab_runtime().shutdown()
