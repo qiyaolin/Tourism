@@ -475,3 +475,16 @@
   - 变更：在编辑器新增协作历史轮询（6 秒）、并发拉取保护与生命周期清理；在行程加载成功后启动轮询，在重置状态/登出/卸载时停止轮询；检测到在线产物命中旧版本后已执行 `docker compose -f infra/docker-compose.yml restart frontend` 完成同步。
   - 结论：修复“编辑后无主动拉取导致历史不显示”的前端链路问题，历史可在后端 flush 后自动更新。
   - 风险：后端历史写入为异步 flush（约 5 秒窗口），因此历史显示存在短延迟，属预期行为。
+
+## Session Update (2026-02-21 Phase 2.6 Realtime Sync + History Reliability Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-007 | Phase 2.6 | 协作实时同步与历史可靠性修复（Redis 不可用降级直写） | test_passed | codex | 2026-02-21T02:18:52-05:00 | `backend/app/services/collab_runtime.py`, `frontend/src/composables/useYjsCollab.ts`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/services/collab_runtime.py backend/app/services/collab_service.py backend/app/api/v1/itinerary_collab.py`=passed；`uv run --project backend pytest -q backend/tests/test_collab_service.py`=3 passed；`pnpm --dir frontend build`=passed；WS 冒烟验证（发送 `collab:update` 后连接保持可用）=passed；`GET /itineraries/{id}/collab/history` 返回 `content_sync` 新记录 | 待用户运行态复测 | 关闭旧标签页后重新打开两个浏览器会话，执行同一行程并发编辑，确认“无需刷新实时可见”且历史持续出现编辑记录 |
+
+### Changelog Addendum
+
+- 2026-02-21T02:18:52-05:00
+  - 变更：定位根因为 Redis 不可用（`localhost:6379` 拒绝连接）导致 `collab:update` 路径抛异常并中断 WS；后端改为 Redis 可选：写 Redis 失败时自动降级为数据库直写并继续广播，不再中断实时链路；前端 `seed` 同步改为显式 `origin=seed`，避免初始化噪声被误记为有效编辑历史。
+  - 结论：在无 Redis 环境下，实时协作链路与协作历史链路可继续工作，历史不再依赖页面刷新后才出现。
+  - 风险：当前环境未启 Redis，历史写入策略为“逐条直写”而非批量聚合；若后续启用 Redis，将自动恢复批处理路径。

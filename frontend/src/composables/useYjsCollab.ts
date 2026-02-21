@@ -207,7 +207,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
         }
         if (joined.needs_seed) {
           pushLocalState(options.getLocalState(), "seed");
-          sendUpdate(Y.encodeStateAsUpdate(ydoc), { reason: "seed" });
+          sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: "seed", reason: "seed" });
         } else {
           options.applyRemoteState(extractStateFromDoc());
         }

@@ -2,6 +2,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from uuid import UUID
 
 import redis.asyncio as redis
 from fastapi import WebSocket
+from redis.exceptions import RedisError
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -19,6 +21,7 @@ from app.services.collab_service import CollabIdentity
 
 _PENDING_ROOMS_KEY = "atlas:collab:pending:rooms"
 _PENDING_LIST_PREFIX = "atlas:collab:pending:"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -97,7 +100,6 @@ class CollabRuntime:
     async def broadcast_update(
         self, conn: RuntimeConnection, update_b64: str, event_meta: dict[str, Any]
     ) -> None:
-        await self._persist_pending_update(conn, update_b64, event_meta)
         message = {
             "type": "collab:update",
             "session_id": conn.connection_id,
@@ -109,6 +111,9 @@ class CollabRuntime:
             message,
             exclude_connection_id=conn.connection_id,
         )
+        persisted = await self._persist_pending_update(conn, update_b64, event_meta)
+        if not persisted:
+            await self._persist_update_direct(conn, update_b64, event_meta)
 
     async def _send_join_payload(self, conn: RuntimeConnection) -> None:
         snapshot_b64, needs_seed = await self._load_document_snapshot(conn.itinerary_id)
@@ -166,9 +171,9 @@ class CollabRuntime:
 
     async def _persist_pending_update(
         self, conn: RuntimeConnection, update_b64: str, event_meta: dict[str, Any]
-    ) -> None:
+    ) -> bool:
         if self._redis is None:
-            return
+            return False
         payload = {
             "session_id": conn.connection_id,
             "participant_type": conn.identity.participant_type,
@@ -181,8 +186,77 @@ class CollabRuntime:
             "created_at": datetime.now(UTC).isoformat(),
         }
         key = f"{_PENDING_LIST_PREFIX}{conn.itinerary_id}"
-        await self._redis.sadd(_PENDING_ROOMS_KEY, str(conn.itinerary_id))
-        await self._redis.rpush(key, json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+        try:
+            await self._redis.sadd(_PENDING_ROOMS_KEY, str(conn.itinerary_id))
+            await self._redis.rpush(key, json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+            return True
+        except RedisError as exc:
+            logger.warning(
+                "collab redis unavailable; switching to direct persistence: %s",
+                exc,
+            )
+            await self._disable_redis()
+            return False
+
+    async def _disable_redis(self) -> None:
+        if self._redis is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._redis.close()
+        self._redis = None
+
+    @staticmethod
+    def _resolve_origin(meta: dict[str, Any]) -> str:
+        maybe_origin = meta.get("origin")
+        if isinstance(maybe_origin, str) and maybe_origin.strip():
+            return maybe_origin.strip()
+        return "local"
+
+    async def _persist_update_direct(
+        self,
+        conn: RuntimeConnection,
+        update_b64: str,
+        event_meta: dict[str, Any],
+    ) -> None:
+        try:
+            update_bytes = base64.b64decode(update_b64)
+        except ValueError:
+            return
+        origin = self._resolve_origin(event_meta)
+        with SessionLocal() as db:
+            doc_row = db.get(ItineraryCollabDocument, conn.itinerary_id)
+            if doc_row is None:
+                doc_row = ItineraryCollabDocument(
+                    itinerary_id=conn.itinerary_id, state_update=None, update_count=0
+                )
+                db.add(doc_row)
+                db.flush()
+
+            doc_row.state_update = update_bytes
+            doc_row.update_count = int(doc_row.update_count or 0) + 1
+            db.add(doc_row)
+
+            if origin not in {"bootstrap", "seed"}:
+                actor_user_id = conn.identity.actor_user_id
+                db.add(
+                    ItineraryCollabEventLog(
+                        itinerary_id=conn.itinerary_id,
+                        actor_type=conn.identity.participant_type,
+                        actor_user_id=actor_user_id,
+                        guest_name=conn.identity.guest_name,
+                        event_type="content_sync",
+                        target_type="document",
+                        target_id=str(conn.itinerary_id),
+                        payload={
+                            "bytes": len(update_bytes),
+                            "updates": 1,
+                            "origin_counts": {origin: 1},
+                            "origin": origin,
+                            "session_ids": [conn.connection_id],
+                        },
+                    )
+                )
+            db.commit()
 
     async def _load_document_snapshot(self, itinerary_id: UUID) -> tuple[str | None, bool]:
         with SessionLocal() as db:
