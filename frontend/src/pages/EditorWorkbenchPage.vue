@@ -171,6 +171,9 @@ const meaningfulCollabHistory = computed(() =>
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let collabSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let collabHistoryPollTimer: ReturnType<typeof setInterval> | null = null;
+let collabHistorySyncing = false;
+const COLLAB_HISTORY_POLL_INTERVAL_MS = 6000;
 
 function makeClientId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -372,6 +375,7 @@ function applyRemoteCollabState(state: { start_date: string; items: unknown[] })
 }
 
 function resetItineraryState() {
+  stopCollabHistoryPolling();
   itineraries.value = [];
   selectedItineraryId.value = "";
   baselineItems.value = [];
@@ -914,6 +918,7 @@ function hasFieldChanges(base: ItineraryItemWithPoi, current: TimelineDraftItem)
 
 async function loadSelectedItineraryItems() {
   if (!selectedItineraryId.value) {
+    stopCollabHistoryPolling();
     baselineItems.value = [];
     draftItems.value = [];
     activeItemClientId.value = "";
@@ -922,6 +927,7 @@ async function loadSelectedItineraryItems() {
     return;
   }
   if (!token.value) {
+    stopCollabHistoryPolling();
     collab.disconnect();
     return;
   }
@@ -950,11 +956,13 @@ async function loadSelectedItineraryItems() {
     itineraryStartDateDraft.value = selectedItinerary.value?.start_date || "";
     await loadWeather();
     await loadCollabLinksAndHistory();
+    startCollabHistoryPolling();
     connectCollabChannel();
     if (canSaveToServer.value) {
       collab.pushLocalState(currentCollabState(), "bootstrap");
     }
   } catch (e) {
+    stopCollabHistoryPolling();
     baselineItems.value = [];
     draftItems.value = [];
     activeItemClientId.value = "";
@@ -1096,15 +1104,41 @@ function connectCollabChannel() {
   collab.disconnect();
 }
 
-async function loadCollabLinksAndHistory() {
+function stopCollabHistoryPolling() {
+  if (collabHistoryPollTimer) {
+    clearInterval(collabHistoryPollTimer);
+    collabHistoryPollTimer = null;
+  }
+}
+
+function startCollabHistoryPolling() {
+  stopCollabHistoryPolling();
   if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
+    return;
+  }
+  collabHistoryPollTimer = setInterval(() => {
+    void loadCollabLinksAndHistory({ silent: true });
+  }, COLLAB_HISTORY_POLL_INTERVAL_MS);
+}
+
+async function loadCollabLinksAndHistory(options: { silent?: boolean } = {}) {
+  const silent = options.silent === true;
+  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
+    stopCollabHistoryPolling();
     collabLinks.value = [];
     collabHistory.value = [];
     collabHistoryLoading.value = false;
+    collabHistorySyncing = false;
+    return;
+  }
+  if (collabHistorySyncing) {
     return;
   }
   collabError.value = "";
-  collabHistoryLoading.value = true;
+  collabHistorySyncing = true;
+  if (!silent) {
+    collabHistoryLoading.value = true;
+  }
   try {
     const [links, history] = await Promise.all([
       fetchCollabLinks(selectedItineraryId.value, token.value),
@@ -1115,7 +1149,10 @@ async function loadCollabLinksAndHistory() {
   } catch (e) {
     collabError.value = e instanceof Error ? e.message : "加载协作信息失败";
   } finally {
-    collabHistoryLoading.value = false;
+    collabHistorySyncing = false;
+    if (!silent) {
+      collabHistoryLoading.value = false;
+    }
   }
 }
 
@@ -1429,9 +1466,22 @@ watch(
   ([nextToken, itineraryId]) => {
     if (nextToken && itineraryId) {
       connectCollabChannel();
+      startCollabHistoryPolling();
       return;
     }
+    stopCollabHistoryPolling();
     collab.disconnect();
+  }
+);
+
+watch(
+  () => canManageCollabLinks.value,
+  (value) => {
+    if (value) {
+      startCollabHistoryPolling();
+      return;
+    }
+    stopCollabHistoryPolling();
   }
 );
 
@@ -1481,6 +1531,7 @@ onBeforeUnmount(() => {
     clearInterval(timer);
     timer = null;
   }
+  stopCollabHistoryPolling();
   if (collabSyncTimer) {
     clearTimeout(collabSyncTimer);
     collabSyncTimer = null;

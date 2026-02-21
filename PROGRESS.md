@@ -462,3 +462,16 @@
   - 变更：协作链接列表改为仅返回未撤销分享码（撤销后不再显示）；协作历史改为仅保留 `content_sync` 内容编辑事件，并过滤 `bootstrap/seed` 初始化同步；前端历史文案改为“谁在何时改了什么”（时间轴/开始日期/协作内容）用户可读表达。
   - 结论：协作面板信息密度从“系统噪声”收敛到“用户决策相关”。
   - 风险：内容编辑事件目前按刷新批次聚合展示，如需审计级逐条明细可后续增加“详细模式”开关。
+
+## Session Update (2026-02-21 Phase 2.6 Collab History Auto Refresh)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P2-2.6-006 | Phase 2.6 | 协作历史自动刷新修复（时间块开始时间修改后历史可见） | test_passed | codex | 2026-02-21T02:05:18-05:00 | `frontend/src/pages/EditorWorkbenchPage.vue`, `PROGRESS.md` | `pnpm --dir frontend build`=passed；`pnpm --dir frontend lint`=passed（0 error, warnings only）；版本一致性核验：本地源码命中 `collabHistoryPollTimer/COLLAB_HISTORY_POLL_INTERVAL_MS`，容器内 `/app/src/pages/EditorWorkbenchPage.vue` 命中同特征，在线产物 `http://localhost:5173/src/pages/EditorWorkbenchPage.vue` 命中 `collabHistoryPollTimer=9`、`silent: true=1` | 待用户运行态复测 | 关闭旧标签页后重新打开编辑器，修改时间块开始时间，等待约 5-10 秒确认协作历史出现“更新了时间轴内容”记录 |
+
+### Changelog Addendum
+
+- 2026-02-21T02:05:18-05:00
+  - 变更：在编辑器新增协作历史轮询（6 秒）、并发拉取保护与生命周期清理；在行程加载成功后启动轮询，在重置状态/登出/卸载时停止轮询；检测到在线产物命中旧版本后已执行 `docker compose -f infra/docker-compose.yml restart frontend` 完成同步。
+  - 结论：修复“编辑后无主动拉取导致历史不显示”的前端链路问题，历史可在后端 flush 后自动更新。
+  - 风险：后端历史写入为异步 flush（约 5 秒窗口），因此历史显示存在短延迟，属预期行为。
