@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.share import router as share_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.services.collab_runtime import get_collab_runtime
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(share_router)
 if settings.storage_provider == "local":
     Path(settings.storage_local_root).mkdir(parents=True, exist_ok=True)
     app.mount(

@@ -1,6 +1,15 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_db
@@ -68,10 +77,23 @@ def list_collab_history_api(
     itinerary_id: UUID,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
+    authorization: str | None = Header(None),
+    x_collab_grant: str | None = Header(None),
+    x_collab_token: str | None = Header(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ) -> ItineraryCollabHistoryListResponse:
-    return list_collab_history(db, itinerary_id, current_user, offset, limit)
+    auth_token = None
+    if authorization and authorization.startswith("Bearer "):
+        auth_token = authorization.split(" ")[1]
+        
+    identity = resolve_collab_identity(
+        db,
+        itinerary_id,
+        auth_token=auth_token,
+        collab_grant=x_collab_grant,
+        collab_token=x_collab_token,
+    )
+    return list_collab_history(db, itinerary_id, identity, offset, limit)
 
 
 @router.websocket("/{itinerary_id}/collab/ws")

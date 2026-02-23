@@ -9,6 +9,9 @@ import PublicItineraryPage from "./pages/PublicItineraryPage.vue";
 import EditorWorkbenchPage from "./pages/EditorWorkbenchPage.vue";
 import CorrectionReviewPage from "./pages/CorrectionReviewPage.vue";
 import NotificationsPage from "./pages/NotificationsPage.vue";
+import PassportPage from "./pages/PassportPage.vue";
+import TerritoryPage from "./pages/TerritoryPage.vue";
+import AdminTerritoryReviewPage from "./pages/AdminTerritoryReviewPage.vue";
 import { useAuth } from "./composables/useAuth";
 
 const routes = [
@@ -21,7 +24,10 @@ const routes = [
   { path: "/editor", component: EditorWorkbenchPage, meta: { requiresAuth: true } },
   { path: "/corrections/mine", component: MyCorrectionsPage, meta: { requiresAuth: true } },
   { path: "/corrections/review", component: CorrectionReviewPage, meta: { requiresAuth: true } },
-  { path: "/notifications", component: NotificationsPage, meta: { requiresAuth: true } }
+  { path: "/notifications", component: NotificationsPage, meta: { requiresAuth: true } },
+  { path: "/passport", component: PassportPage, meta: { requiresAuth: true } },
+  { path: "/territories", component: TerritoryPage },
+  { path: "/admin/territories/review", component: AdminTerritoryReviewPage, meta: { requiresAuth: true } }
 ];
 
 const router = createRouter({

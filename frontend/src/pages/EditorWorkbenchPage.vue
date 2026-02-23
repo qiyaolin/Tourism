@@ -35,6 +35,9 @@ import ItineraryDiffPanel from "../components/ItineraryDiffPanel.vue";
 import PoiInfoCard from "../components/PoiInfoCard.vue";
 import TimelineEditor from "../components/TimelineEditor.vue";
 import TimelineWeatherStrip from "../components/TimelineWeatherStrip.vue";
+import CollabPanel from "../components/CollabPanel.vue";
+import CollabAvatarBar from "../components/CollabAvatarBar.vue";
+import { computeDraftItemsDiff } from "../utils/collabDiff";
 import { useAmap } from "../composables/useAmap";
 import { useAuth } from "../composables/useAuth";
 import { useYjsCollab } from "../composables/useYjsCollab";
@@ -139,33 +142,24 @@ const selectedMapItem = computed<ItineraryItemWithPoi | null>(() => {
   }
   return toMapItem(target);
 });
-const collab = useYjsCollab({
+const { participants: collabParticipants, permission: collabPermission, connected: collabConnected, error: collabWsError, remoteCursors, disconnect, connect, pushLocalState, sendCursor, sendHistoryUpdate } = useYjsCollab({
   itineraryId: () => selectedItineraryId.value,
   authToken: () => token.value || "",
   collabGrant: () => selectedCollabGrant.value,
   getLocalState: () => currentCollabState(),
   applyRemoteState: (state) => applyRemoteCollabState(state)
 });
-const collabParticipants = collab.participants;
-const collabPermission = collab.permission;
-const collabConnected = collab.connected;
-const collabWsError = collab.error;
 const meaningfulCollabHistory = computed(() =>
   collabHistory.value.filter((item) => {
     if (item.event_type !== "content_sync" && item.event_type !== "y_update") {
       return false;
     }
     const payload = item.payload || {};
-    const originFromMeta =
-      payload &&
-      typeof payload === "object" &&
-      payload.meta &&
-      typeof payload.meta === "object" &&
-      typeof (payload.meta as { origin?: unknown }).origin === "string"
-        ? String((payload.meta as { origin?: unknown }).origin)
-        : "";
-    const origin = originFromMeta || (typeof payload.origin === "string" ? payload.origin : "");
-    return origin !== "bootstrap" && origin !== "seed";
+    // Only show entries with specific descriptions from the 10s diff timer.
+    // These always contain 【】 markers (e.g., "在【故宫】将【预算花费】从 ...").
+    // Generic fallbacks like "编辑了协作内容" or "更新了时间轴内容" are useless.
+    const description = typeof payload.description === "string" ? payload.description : "";
+    return description.includes("【");
   })
 );
 
@@ -174,6 +168,33 @@ let collabSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let collabHistoryPollTimer: ReturnType<typeof setInterval> | null = null;
 let collabHistorySyncing = false;
 const COLLAB_HISTORY_POLL_INTERVAL_MS = 6000;
+
+// 10s diff timer for collaboration history
+let collabDiffTimer: ReturnType<typeof setInterval> | null = null;
+let lastDiffSnapshotItems: TimelineDraftItem[] = [];
+
+function startCollabDiffTimer() {
+  stopCollabDiffTimer();
+  lastDiffSnapshotItems = JSON.parse(JSON.stringify(draftItems.value));
+  collabDiffTimer = setInterval(() => {
+    if (collabPermission.value !== "edit") return;
+    const currentItems = draftItems.value;
+    const diffs = computeDraftItemsDiff(lastDiffSnapshotItems, currentItems);
+    lastDiffSnapshotItems = JSON.parse(JSON.stringify(currentItems));
+    if (diffs.length > 0) {
+      const descriptions = diffs.map((d) => d.description);
+      const description = descriptions.slice(0, 3).join("\uff1b") + (descriptions.length > 3 ? " \u7b49" : "");
+      sendHistoryUpdate(description);
+    }
+  }, 10000);
+}
+
+function stopCollabDiffTimer() {
+  if (collabDiffTimer) {
+    clearInterval(collabDiffTimer);
+    collabDiffTimer = null;
+  }
+}
 
 function makeClientId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -351,12 +372,36 @@ function applyRemoteCollabState(state: { start_date: string; items: unknown[] })
     const parsedItems = Array.isArray(state.items)
       ? state.items.map((item) => deserializeDraftItem(item)).filter((item): item is TimelineDraftItem => item !== null)
       : [];
+
+    // compute diffs to find what changed, so we can animate UI
+    const diffs = computeDraftItemsDiff(draftItems.value, parsedItems);
+    const changedTargets = new Set(diffs.filter(d => d.type === "modify" || d.type === "reorder").map(d => d.targetName));
+
     draftItems.value = parsedItems
       .slice()
       .sort((a, b) => a.dayIndex - b.dayIndex || a.sortOrder - b.sortOrder);
+    
+    // flash the changed items
+    if (changedTargets.size > 0 && typeof document !== "undefined") {
+      import("vue").then(({ nextTick }) => {
+        nextTick(() => {
+          document.querySelectorAll(".timeline-block-title").forEach(titleEl => {
+            if (changedTargets.has(titleEl.textContent?.trim() || "")) {
+              const blockEl = titleEl.closest(".timeline-block");
+              if (blockEl) {
+                blockEl.classList.add("remote-updated");
+                setTimeout(() => blockEl.classList.remove("remote-updated"), 800);
+              }
+            }
+          });
+        });
+      });
+    }
+
     const maxDay = draftItems.value.reduce((max, item) => Math.max(max, item.dayIndex), 1);
     if (selectedItinerary.value) {
-      selectedItinerary.value.days = Math.max(1, maxDay);
+      // Preserve manually-added empty days: only grow, never shrink
+      selectedItinerary.value.days = Math.max(selectedItinerary.value.days || 1, maxDay);
     }
     const first = draftItems.value[0] || null;
     if (!first) {
@@ -367,10 +412,18 @@ function applyRemoteCollabState(state: { start_date: string; items: unknown[] })
       activeDay.value = first.dayIndex;
     }
     dirty.value = true;
+    // Refresh the diff snapshot so the 10s timer doesn't re-report remote changes
+    lastDiffSnapshotItems = JSON.parse(JSON.stringify(draftItems.value));
     saveSuccess.value = "已同步协作者修改（尚未保存到服务器）";
-    renderCurrentMarkers();
+    // Do NOT re-render map markers here; remote updates should only
+    // affect the timeline UI, not cause the map to jitter.
   } finally {
-    applyingRemoteCollab.value = false;
+    // Vue watchers are async. Use nextTick to unset the flag AFTER watchers have run.
+    import("vue").then(({ nextTick }) => {
+      nextTick(() => {
+        applyingRemoteCollab.value = false;
+      });
+    });
   }
 }
 
@@ -408,7 +461,7 @@ function resetItineraryState() {
   applyingRemoteCollab.value = false;
   markerKeyToClientId.clear();
   clearMarkers();
-  collab.disconnect();
+  disconnect();
 }
 
 function resetDiffState(keepOpen = false) {
@@ -809,6 +862,7 @@ function selectItem(clientId: string) {
     return;
   }
   focusMarker(target.itemId || target.clientId);
+  sendCursor(clientId);
 }
 
 function reorderDay(dayIndex: number, orderedClientIds: string[]) {
@@ -826,6 +880,16 @@ function reorderDay(dayIndex: number, orderedClientIds: string[]) {
       sortOrder: order
     };
   });
+  dirty.value = true;
+  saveSuccess.value = "";
+}
+
+function handleAddDay() {
+  if (!selectedItinerary.value) {
+    return;
+  }
+  selectedItinerary.value.days = (selectedItinerary.value.days || 1) + 1;
+  activeDay.value = selectedItinerary.value.days;
   dirty.value = true;
   saveSuccess.value = "";
 }
@@ -928,7 +992,7 @@ async function loadSelectedItineraryItems() {
   }
   if (!token.value) {
     stopCollabHistoryPolling();
-    collab.disconnect();
+    disconnect();
     return;
   }
   itineraryLoading.value = true;
@@ -959,7 +1023,7 @@ async function loadSelectedItineraryItems() {
     startCollabHistoryPolling();
     connectCollabChannel();
     if (canSaveToServer.value) {
-      collab.pushLocalState(currentCollabState(), "bootstrap");
+      pushLocalState(currentCollabState(), "bootstrap");
     }
   } catch (e) {
     stopCollabHistoryPolling();
@@ -973,7 +1037,7 @@ async function loadSelectedItineraryItems() {
     collabLinks.value = [];
     collabHistory.value = [];
     clearCollabGrant(selectedItineraryId.value);
-    collab.disconnect();
+    disconnect();
     itineraryError.value = e instanceof Error ? e.message : "加载行程地点失败";
   } finally {
     itineraryLoading.value = false;
@@ -1087,21 +1151,24 @@ function queueCollabSync(origin: string) {
     collabSyncTimer = null;
   }
   collabSyncTimer = setTimeout(() => {
-    collab.pushLocalState(currentCollabState(), origin);
+    pushLocalState(currentCollabState(), origin);
     collabSyncTimer = null;
   }, 160);
 }
 
 function connectCollabChannel() {
   if (!selectedItineraryId.value) {
-    collab.disconnect();
+    stopCollabDiffTimer();
+    disconnect();
     return;
   }
   if (token.value && (canManageCollabLinks.value || Boolean(selectedCollabGrant.value))) {
-    collab.connect();
+    connect();
+    startCollabDiffTimer();
     return;
   }
-  collab.disconnect();
+  stopCollabDiffTimer();
+  disconnect();
 }
 
 function stopCollabHistoryPolling() {
@@ -1123,7 +1190,7 @@ function startCollabHistoryPolling() {
 
 async function loadCollabLinksAndHistory(options: { silent?: boolean } = {}) {
   const silent = options.silent === true;
-  if (!token.value || !selectedItineraryId.value || !canManageCollabLinks.value) {
+  if (!token.value || !selectedItineraryId.value || (!canManageCollabLinks.value && !selectedCollabGrant.value)) {
     stopCollabHistoryPolling();
     collabLinks.value = [];
     collabHistory.value = [];
@@ -1140,12 +1207,22 @@ async function loadCollabLinksAndHistory(options: { silent?: boolean } = {}) {
     collabHistoryLoading.value = true;
   }
   try {
-    const [links, history] = await Promise.all([
-      fetchCollabLinks(selectedItineraryId.value, token.value),
-      fetchCollabHistory(selectedItineraryId.value, token.value, 0, 20)
-    ]);
-    collabLinks.value = links.items;
-    collabHistory.value = history.items;
+    const promises: Promise<void>[] = [];
+    if (canManageCollabLinks.value) {
+      promises.push(
+        fetchCollabLinks(selectedItineraryId.value, token.value).then(res => {
+          collabLinks.value = res.items;
+        })
+      );
+    } else {
+      collabLinks.value = [];
+    }
+    promises.push(
+      fetchCollabHistory(selectedItineraryId.value, token.value, 0, 20, selectedCollabGrant.value || undefined).then(res => {
+        collabHistory.value = res.items;
+      })
+    );
+    await Promise.all(promises);
   } catch (e) {
     collabError.value = e instanceof Error ? e.message : "加载协作信息失败";
   } finally {
@@ -1211,36 +1288,6 @@ async function handleCopyCollabShareCode(shareCode: string) {
   } catch {
     collabError.value = "复制失败，请手动复制分享码";
   }
-}
-
-function resolveHistoryActorLabel(item: CollabHistoryItem): string {
-  if (item.actor_user_id && user.value?.id && item.actor_user_id === user.value.id) {
-    return "你";
-  }
-  if (item.actor_type === "guest") {
-    return item.guest_name || "访客";
-  }
-  return "协作者";
-}
-
-function resolveHistoryActionLabel(item: CollabHistoryItem): string {
-  const payload = item.payload || {};
-  const originFromMeta =
-    payload &&
-    typeof payload === "object" &&
-    payload.meta &&
-    typeof payload.meta === "object" &&
-    typeof (payload.meta as { origin?: unknown }).origin === "string"
-      ? String((payload.meta as { origin?: unknown }).origin)
-      : "";
-  const origin = originFromMeta || (typeof payload.origin === "string" ? payload.origin : "");
-  if (origin === "start-date") {
-    return "更新了开始日期";
-  }
-  if (origin === "draft-items") {
-    return "更新了时间轴内容";
-  }
-  return "编辑了协作内容";
 }
 
 async function handleSaveChanges() {
@@ -1470,7 +1517,7 @@ watch(
       return;
     }
     stopCollabHistoryPolling();
-    collab.disconnect();
+    disconnect();
   }
 );
 
@@ -1497,7 +1544,10 @@ watch(
 watch(
   () => draftItems.value,
   () => {
-    renderCurrentMarkers();
+    // Only re-render map markers for local edits, not remote sync updates.
+    if (!applyingRemoteCollab.value) {
+      renderCurrentMarkers();
+    }
     queueCollabSync("draft-items");
   },
   { deep: true }
@@ -1536,7 +1586,7 @@ onBeforeUnmount(() => {
     clearTimeout(collabSyncTimer);
     collabSyncTimer = null;
   }
-  collab.disconnect();
+  disconnect();
   destroyMap();
 });
 </script>
@@ -1548,12 +1598,17 @@ onBeforeUnmount(() => {
         <p class="kicker">
           Project Atlas
         </p>
-        <h1>Phase 1.5 时间轴编辑器</h1>
+        <h1>行程编辑器</h1>
       </div>
       <div
         v-if="isLoggedIn"
         class="user-line"
       >
+        <CollabAvatarBar
+          v-if="collabConnected"
+          :participants="collabParticipants"
+          :current-user-id="user?.id || null"
+        />
         <span>你好，{{ user?.nickname || "Traveler" }}</span>
         <button
           class="btn ghost"
@@ -1711,122 +1766,6 @@ onBeforeUnmount(() => {
             {{ saveSuccess }}
           </p>
           <div class="divider-line" />
-          <h3>实时协作</h3>
-          <p class="subtle">
-            连接状态：{{ collabConnected ? "已连接" : "未连接" }} · 当前权限：{{ collabPermission === "edit" ? "可编辑" : "只读" }}
-          </p>
-          <p
-            v-if="!canManageCollabLinks"
-            class="subtle"
-          >
-            当前为协作者模式：{{ canSaveToServer ? "可保存到服务器" : "只读协作" }}
-          </p>
-          <p
-            v-if="collabError"
-            class="error"
-          >
-            {{ collabError }}
-          </p>
-          <p
-            v-if="collabWsError"
-            class="error"
-          >
-            {{ collabWsError }}
-          </p>
-          <div class="subtle">
-            在线协作者：{{ collabParticipants.length }}
-          </div>
-          <ul class="mini-list">
-            <li
-              v-for="participant in collabParticipants"
-              :key="participant.session_id"
-            >
-              {{ participant.display_name }}（{{ participant.permission === "edit" ? "编辑" : "只读" }}）
-            </li>
-          </ul>
-          <div class="action-row">
-            <select
-              v-model="collabPermissionDraft"
-              class="input"
-              :disabled="collabCreatePending || !selectedItineraryId || !canManageCollabLinks"
-            >
-              <option value="edit">
-                新链接默认可编辑
-              </option>
-              <option value="read">
-                新链接默认只读
-              </option>
-            </select>
-            <button
-              class="btn"
-              :disabled="collabCreatePending || !selectedItineraryId || !canManageCollabLinks"
-              @click="handleCreateCollabLink"
-            >
-              {{ collabCreatePending ? "创建中..." : "创建分享码" }}
-            </button>
-          </div>
-          <p
-            v-if="collabShareCode"
-            class="hint"
-          >
-            最新分享码：{{ collabShareCode }}
-          </p>
-          <button
-            v-if="collabShareCode"
-            class="btn ghost"
-            @click="handleCopyCollabShareCode(collabShareCode)"
-          >
-            重新复制最新分享码
-          </button>
-          <p
-            v-if="collabShareUrl"
-            class="subtle"
-          >
-            分享链接（可选）：{{ collabShareUrl }}
-          </p>
-          <ul class="mini-list">
-            <li
-              v-for="link in collabLinks"
-              :key="link.id"
-            >
-              <span>
-                {{ link.permission === "edit" ? "编辑" : "只读" }} · 码尾 {{ link.share_code_last4 }}
-              </span>
-              <div class="inline-actions">
-                <button
-                  class="btn ghost"
-                  :disabled="!canManageCollabLinks"
-                  @click="handleToggleCollabLinkPermission(link.id, link.permission === 'edit' ? 'read' : 'edit')"
-                >
-                  切换权限
-                </button>
-                <button
-                  class="btn danger"
-                  :disabled="!canManageCollabLinks"
-                  @click="handleRevokeCollabLink(link.id)"
-                >
-                  撤销
-                </button>
-              </div>
-            </li>
-          </ul>
-          <p class="subtle">
-            协作历史（最近 20 条）
-          </p>
-          <p
-            v-if="collabHistoryLoading"
-            class="subtle"
-          >
-            协作历史加载中...
-          </p>
-          <ul class="mini-list">
-            <li
-              v-for="item in meaningfulCollabHistory"
-              :key="item.id"
-            >
-              {{ resolveHistoryActorLabel(item) }} {{ resolveHistoryActionLabel(item) }} · {{ new Date(item.created_at).toLocaleTimeString() }}
-            </li>
-          </ul>
           <label class="field-label">开始日期（天气映射基准）</label>
           <input
             v-model="itineraryStartDateDraft"
@@ -1879,6 +1818,29 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
+        <CollabPanel
+          v-if="selectedItineraryId"
+          v-model:collab-permission-draft="collabPermissionDraft"
+          :collab-connected="collabConnected"
+          :collab-permission="collabPermission"
+          :can-manage-collab-links="canManageCollabLinks"
+          :can-save-to-server="canSaveToServer"
+          :collab-error="collabError"
+          :collab-ws-error="collabWsError"
+          :collab-participants="collabParticipants"
+          :collab-create-pending="collabCreatePending"
+          :selected-itinerary-id="selectedItineraryId"
+          :collab-share-code="collabShareCode"
+          :collab-share-url="collabShareUrl"
+          :collab-links="collabLinks"
+          :collab-history-loading="collabHistoryLoading"
+          :meaningful-collab-history="meaningfulCollabHistory"
+          @create-collab-link="handleCreateCollabLink"
+          @copy-share-code="handleCopyCollabShareCode"
+          @toggle-link-permission="handleToggleCollabLinkPermission"
+          @revoke-link="handleRevokeCollabLink"
+        />
+
         <ItineraryDiffPanel
           :open="diffOpen"
           :loading="diffLoading"
@@ -1910,6 +1872,7 @@ onBeforeUnmount(() => {
           :items="draftItems"
           :active-day="activeDay"
           :active-item-client-id="activeItemClientId"
+          :remote-cursors="remoteCursors"
           :pois="poiCatalog"
           :poi-loading="poiLoading"
           :poi-error="poiError"
@@ -1919,6 +1882,7 @@ onBeforeUnmount(() => {
           @patch-item="patchItem"
           @reorder-day="reorderDay($event.dayIndex, $event.orderedClientIds)"
           @add-item="addItem"
+          @add-day="handleAddDay"
         />
         <div
           v-else
@@ -1971,4 +1935,3 @@ onBeforeUnmount(() => {
     />
   </main>
 </template>
-

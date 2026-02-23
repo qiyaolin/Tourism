@@ -355,11 +355,11 @@ def update_collab_link(
 def list_collab_history(
     db: Session,
     itinerary_id: UUID,
-    current_user: User,
+    identity: CollabIdentity,
     offset: int,
     limit: int,
 ) -> ItineraryCollabHistoryListResponse:
-    _ensure_itinerary_owner(db, itinerary_id, current_user)
+    # Access is already verified by resolve_collab_identity
     base = select(ItineraryCollabEventLog).where(
         ItineraryCollabEventLog.itinerary_id == itinerary_id,
         ItineraryCollabEventLog.event_type.in_(("content_sync", "y_update")),

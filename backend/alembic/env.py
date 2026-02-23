@@ -20,6 +20,7 @@ from app.models import (  # noqa: F401
     poi_correction_type,
     poi_ticket_rule,
     pricing_audience,
+    territory,
     user,
     user_notification,
     verification_code,

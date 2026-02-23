@@ -73,6 +73,7 @@ onMounted(async () => {
       <article v-for="item in items" :key="item.id" class="mine-card">
         <h3>{{ item.type_label }}</h3>
         <p class="subtle">POI：{{ item.poi_id }}</p>
+        <p class="subtle">区域：{{ item.territory_name || "未归属区域" }}</p>
         <p class="subtle">提议：{{ item.proposed_value || "未填写" }}</p>
         <p class="subtle">说明：{{ item.details || "无" }}</p>
         <a v-if="item.photo_url" class="btn ghost" :href="item.photo_url" target="_blank" rel="noreferrer">查看图片</a>

@@ -1,10 +1,38 @@
 ﻿<script setup lang="ts">
+import { computed } from "vue";
 import type { TimelineDraftItem, TimelineItemPatch } from "../types/timeline";
 
 const props = defineProps<{
   item: TimelineDraftItem;
   active: boolean;
+  remoteCursors?: Map<string, { clientId: string; timestamp: number }>;
 }>();
+
+// Simple color hash logic (same as CollabAvatarBar)
+function getCursorColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return `hsl(${Math.abs(hash % 360)}, 70%, 40%)`;
+}
+
+// Find all remote users currently selecting this specific item
+const activeRemoteCursors = computed(() => {
+  if (!props.remoteCursors) return [];
+  const result: { id: string; color: string }[] = [];
+  const now = Date.now();
+  for (const [participantId, cursor] of props.remoteCursors.entries()) {
+    // Only show active cursors (updated within the last 2 minutes)
+    if (cursor.clientId === props.item.clientId && now - cursor.timestamp < 120000) {
+      result.push({
+        id: participantId,
+        color: getCursorColor(participantId)
+      });
+    }
+  }
+  return result;
+});
 
 const emit = defineEmits<{
   (event: "select", clientId: string): void;
@@ -34,9 +62,24 @@ function parseNumber(value: string): number | null {
 <template>
   <article
     class="timeline-block"
-    :class="{ active }"
+    :class="{ active, 'has-remote-cursor': activeRemoteCursors.length > 0 }"
+    :style="activeRemoteCursors.length > 0 ? { '--remote-color': activeRemoteCursors[0].color } : {}"
     @click="emit('select', item.clientId)"
   >
+    <div
+      v-if="activeRemoteCursors.length > 0"
+      class="remote-cursor-badges"
+    >
+      <div
+        v-for="cursor in activeRemoteCursors"
+        :key="cursor.id"
+        class="remote-cursor-badge"
+        :style="{ backgroundColor: cursor.color }"
+      >
+        阅
+      </div>
+    </div>
+
     <header class="timeline-block-head">
       <p class="timeline-block-order">
         {{ item.dayIndex }}日 · 第{{ item.sortOrder }}站
@@ -100,3 +143,37 @@ function parseNumber(value: string): number | null {
     </div>
   </article>
 </template>
+
+<style scoped>
+.timeline-block {
+  position: relative;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.timeline-block.has-remote-cursor {
+  border-color: var(--remote-color, var(--primary-default));
+  box-shadow: 0 0 0 1px var(--remote-color, var(--primary-default));
+}
+
+.remote-cursor-badges {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  display: flex;
+  gap: 2px;
+  z-index: 10;
+}
+
+.remote-cursor-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: white;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface-default);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+</style>

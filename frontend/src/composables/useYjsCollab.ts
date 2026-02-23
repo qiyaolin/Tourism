@@ -24,17 +24,23 @@ type JoinedPayload = {
   needs_seed: boolean;
 };
 
-type PresencePayload = {
-  type: "collab:presence";
-  participants: CollabParticipant[];
-};
-
 type UpdatePayload = {
   type: "collab:update";
   update_b64: string;
   session_id: string;
   meta?: Record<string, unknown>;
 };
+
+function resolveCursorClientId(cursor: Record<string, unknown> | null): string | null {
+  if (!cursor) {
+    return null;
+  }
+  const maybeClientId = cursor.clientId;
+  if (typeof maybeClientId === "string") {
+    return maybeClientId;
+  }
+  return null;
+}
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -62,6 +68,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
   const permission = ref<"edit" | "read">("read");
   const connected = ref(false);
   const error = ref("");
+  const remoteCursors = ref<Map<string, { clientId: string; timestamp: number }>>(new Map());
 
   let suppressLocalEmit = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +108,12 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
       root.set("items", state.items);
     }, origin);
     suppressLocalEmit = false;
+    // Explicitly send the full doc state over WebSocket.
+    // The ydoc 'update' event was suppressed above (to prevent re-sending
+    // remote updates), so we must manually broadcast after local changes.
+    if (permission.value === "edit") {
+      sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: typeof origin === "string" ? origin : "local", skip_history: true });
+    }
   }
 
   function sendUpdate(update: Uint8Array, meta: Record<string, unknown> = {}) {
@@ -112,6 +125,18 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
         type: "collab:update",
         update_b64: bytesToBase64(update),
         meta
+      })
+    );
+  }
+
+  function sendCursor(clientId: string) {
+    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.value.send(
+      JSON.stringify({
+        type: "collab:cursor",
+        cursor: { clientId }
       })
     );
   }
@@ -198,24 +223,37 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
         error.value = message || "实时协作错误";
         return;
       }
-      if (type === "collab:joined") {
-        const joined = payload as JoinedPayload;
-        permission.value = joined.permission;
-        participants.value = normalizeParticipants(joined.participants || []);
-        if (joined.snapshot_update_b64) {
-          Y.applyUpdate(ydoc, base64ToBytes(joined.snapshot_update_b64), "remote");
+      if (type === "collab:presence" || type === "collab:joined") {
+        const payloadJoinedOrPresence = payload as unknown as { participants: CollabParticipant[] };
+        participants.value = normalizeParticipants(payloadJoinedOrPresence.participants || []);
+
+        // Extract cursors from presence
+        const newCursors = new Map<string, { clientId: string; timestamp: number }>();
+        for (const p of payloadJoinedOrPresence.participants || []) {
+          const participantId = p.participant_user_id || p.session_id;
+          const cursorClientId = resolveCursorClientId(p.cursor);
+          if (cursorClientId) {
+            newCursors.set(participantId, {
+              clientId: cursorClientId,
+              timestamp: Date.now()
+            });
+          }
         }
-        if (joined.needs_seed) {
-          pushLocalState(options.getLocalState(), "seed");
-          sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: "seed", reason: "seed" });
-        } else {
-          options.applyRemoteState(extractStateFromDoc());
+        remoteCursors.value = newCursors;
+
+        if (type === "collab:joined") {
+          const joined = payload as unknown as JoinedPayload;
+          permission.value = joined.permission;
+          if (joined.snapshot_update_b64) {
+            Y.applyUpdate(ydoc, base64ToBytes(joined.snapshot_update_b64), "remote");
+          }
+          if (joined.needs_seed) {
+            pushLocalState(options.getLocalState(), "seed");
+            sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: "seed", reason: "seed" });
+          } else {
+            options.applyRemoteState(extractStateFromDoc());
+          }
         }
-        return;
-      }
-      if (type === "collab:presence") {
-        const presence = payload as PresencePayload;
-        participants.value = normalizeParticipants(presence.participants || []);
         return;
       }
       if (type === "collab:update") {
@@ -239,7 +277,7 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
     if (permission.value !== "edit") {
       return;
     }
-    sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: typeof origin === "string" ? origin : "local" });
+    sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: typeof origin === "string" ? origin : "local", skip_history: true });
   });
 
   onBeforeUnmount(() => {
@@ -252,8 +290,15 @@ export function useYjsCollab(options: UseYjsCollabOptions) {
     permission: computed(() => permission.value),
     connected: computed(() => connected.value),
     error: computed(() => error.value),
+    remoteCursors: computed(() => remoteCursors.value),
     connect,
     disconnect,
-    pushLocalState
+    pushLocalState,
+    sendCursor,
+    sendHistoryUpdate: (description: string) => {
+      if (permission.value === "edit" && ws.value && ws.value.readyState === WebSocket.OPEN) {
+        sendUpdate(Y.encodeStateAsUpdate(ydoc), { origin: "draft-items", description });
+      }
+    }
   };
 }

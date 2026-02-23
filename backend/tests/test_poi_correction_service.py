@@ -13,6 +13,19 @@ from app.models.poi_correction_type import PoiCorrectionType
 from app.services.poi_correction_service import review_correction, strip_exif_bytes
 
 
+@pytest.fixture(autouse=True)
+def _patch_guardian_dependencies(monkeypatch):
+    monkeypatch.setattr("app.services.poi_correction_service.evaluate_guardian_governance", lambda _db: None)
+    monkeypatch.setattr(
+        "app.services.poi_correction_service.can_review_correction_in_territory",
+        lambda _db, _user, _territory_id: True,
+    )
+    monkeypatch.setattr(
+        "app.services.poi_correction_service.log_guardian_review_activity",
+        lambda *_args, **_kwargs: None,
+    )
+
+
 def test_strip_exif_bytes_removes_exif_marker():
     image = Image.new("RGB", (10, 10), color=(255, 0, 0))
     source = BytesIO()
@@ -58,7 +71,7 @@ class _FakeDb:
         return 0
 
     def scalars(self, _stmt):
-        return SimpleNamespace(all=lambda: [])
+        return SimpleNamespace(first=lambda: self._correction, all=lambda: [])
 
 
 def test_review_correction_accept_updates_ticket_price():
@@ -92,7 +105,13 @@ def test_review_correction_accept_updates_ticket_price():
         placeholder=None,
         sort_order=10,
     )
-    poi = SimpleNamespace(id=correction.poi_id, ticket_price=50.0, opening_hours=None, address=None)
+    poi = SimpleNamespace(
+        id=correction.poi_id,
+        ticket_price=50.0,
+        opening_hours=None,
+        address=None,
+        territory_id=None,
+    )
     current_user = SimpleNamespace(id=uuid4())
     db = _FakeDb(correction, correction_type, poi)
 
@@ -135,7 +154,13 @@ def test_review_correction_opening_hours_rejects_invalid_format():
         placeholder=None,
         sort_order=20,
     )
-    poi = SimpleNamespace(id=correction.poi_id, ticket_price=50.0, opening_hours="09:00-18:00", address=None)
+    poi = SimpleNamespace(
+        id=correction.poi_id,
+        ticket_price=50.0,
+        opening_hours="09:00-18:00",
+        address=None,
+        territory_id=None,
+    )
     current_user = SimpleNamespace(id=uuid4())
     db = _FakeDb(correction, correction_type, poi)
 
@@ -174,7 +199,13 @@ def test_review_correction_opening_hours_accepts_time_range():
         placeholder=None,
         sort_order=20,
     )
-    poi = SimpleNamespace(id=correction.poi_id, ticket_price=50.0, opening_hours="09:00-18:00", address=None)
+    poi = SimpleNamespace(
+        id=correction.poi_id,
+        ticket_price=50.0,
+        opening_hours="09:00-18:00",
+        address=None,
+        territory_id=None,
+    )
     current_user = SimpleNamespace(id=uuid4())
     db = _FakeDb(correction, correction_type, poi)
 

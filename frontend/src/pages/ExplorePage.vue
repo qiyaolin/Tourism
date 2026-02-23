@@ -1,40 +1,106 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { fetchNotifications, fetchPublicItineraries, type PublicItineraryResponse } from "../api";
+import {
+  fetchExploreHeatmap,
+  fetchExploreRecommendations,
+  fetchNotifications,
+  fetchPublicItineraries,
+  type ExploreHeatPointResponse,
+  type ExploreRecommendationItemResponse,
+  type PublicItineraryResponse
+} from "../api";
 import { useAuth } from "../composables/useAuth";
 
 const TEXT = {
-  kicker: "\u63a2\u7d22\u5e7f\u573a",
-  title: "\u63a2\u7d22\u5e7f\u573a",
-  refresh: "\u5237\u65b0",
-  refreshing: "\u5237\u65b0\u4e2d...",
-  signalTitle: "\u9884\u8b66\u4e2d\u5fc3",
-  unread: "\u672a\u8bfb\u901a\u77e5",
-  open: "\u67e5\u770b",
-  intro: "\u516c\u5f00\u53d1\u5e03\u7684\u884c\u7a0b\u4f1a\u5c55\u793a\u5728\u8fd9\u91cc\uff0c\u53ef\u76f4\u63a5\u501f\u9274\u4e3a\u6a21\u677f\u3002",
-  loadFailed: "\u52a0\u8f7d\u63a2\u7d22\u5e7f\u573a\u5931\u8d25",
-  author: "\u4f5c\u8005",
-  detail: "\u6d4f\u89c8\u8be6\u60c5",
-  emptyTitle: "\u6682\u65e0\u516c\u5f00\u884c\u7a0b",
-  emptyDesc: "\u8fd8\u6ca1\u6709\u7528\u6237\u53d1\u5e03\u516c\u5f00\u884c\u7a0b\u3002",
-  daySuffix: "\u5929"
+  kicker: "探索广场",
+  title: "探索广场",
+  refresh: "刷新",
+  refreshing: "刷新中...",
+  signalTitle: "预警中心",
+  unread: "未读通知",
+  open: "查看",
+  intro: "公开发布的行程会展示在这里，并按热度与偏好为你推荐。",
+  loadFailed: "加载探索广场失败",
+  author: "作者",
+  detail: "浏览详情",
+  forked: "借鉴",
+  emptyTitle: "暂无公开行程",
+  emptyDesc: "还没有用户发布公开行程。",
+  daySuffix: "天",
+  heatTitle: "全站足迹热力图",
+  heatHint: "根据公开行程的访问记录聚合",
+  trendTitle: "借鉴趋势榜",
+  trendHint: "按借鉴次数与近期热度排序",
+  recommendationTitle: "智能推荐",
+  recommendationHint: "根据你的浏览偏好和社区热度生成",
+  noVisitTag: "暂无访问记录"
 } as const;
 
 const { token, isLoggedIn } = useAuth();
 const loading = ref(false);
 const error = ref("");
 const itineraries = ref<PublicItineraryResponse[]>([]);
+const heatPoints = ref<ExploreHeatPointResponse[]>([]);
+const recommendations = ref<ExploreRecommendationItemResponse[]>([]);
 const unreadCount = ref(0);
 
 const hasData = computed(() => itineraries.value.length > 0);
+const trendItems = computed(() =>
+  [...itineraries.value]
+    .sort(
+      (a, b) =>
+        b.forked_count - a.forked_count ||
+        Date.parse(b.updated_at) - Date.parse(a.updated_at)
+    )
+    .slice(0, 6)
+);
+const maxHeatScore = computed(() => Math.max(1, ...heatPoints.value.map((point) => point.heat_score)));
+const recommendationItems = computed(() => recommendations.value.slice(0, 6));
+const showRecommendation = computed(() => recommendationItems.value.length > 0);
 
-async function loadPublicItineraries() {
+function formatRecentVisitLabel(lastVisitedAt: string | null): string {
+  if (!lastVisitedAt) {
+    return TEXT.noVisitTag;
+  }
+  const visitDate = new Date(lastVisitedAt);
+  if (Number.isNaN(visitDate.getTime())) {
+    return TEXT.noVisitTag;
+  }
+  const diffMs = Date.now() - visitDate.getTime();
+  if (diffMs < 60 * 60 * 1000) {
+    return "刚刚有人去过";
+  }
+  const hours = Math.floor(diffMs / (60 * 60 * 1000));
+  if (hours < 24) {
+    return `${hours} 小时前有人去过`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days <= 30) {
+    return `${days} 天前有人去过`;
+  }
+  const month = String(visitDate.getMonth() + 1).padStart(2, "0");
+  const day = String(visitDate.getDate()).padStart(2, "0");
+  return `${visitDate.getFullYear()}-${month}-${day} 有人去过`;
+}
+
+function heatBarWidth(score: number): string {
+  const ratio = score / maxHeatScore.value;
+  return `${Math.max(8, Math.round(ratio * 100))}%`;
+}
+
+async function loadExploreData() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await fetchPublicItineraries(0, 60);
-    itineraries.value = result.items;
+    const [publicResult, heatmapResult, recommendationResult] = await Promise.all([
+      fetchPublicItineraries(0, 60),
+      fetchExploreHeatmap(20),
+      fetchExploreRecommendations(12, token.value || undefined)
+    ]);
+    itineraries.value = publicResult.items;
+    heatPoints.value = heatmapResult.items;
+    recommendations.value = recommendationResult.items;
   } catch (e) {
     error.value = e instanceof Error ? e.message : TEXT.loadFailed;
   } finally {
@@ -56,7 +122,7 @@ async function loadNotificationSummary() {
 }
 
 onMounted(() => {
-  void loadPublicItineraries();
+  void loadExploreData();
   void loadNotificationSummary();
 });
 </script>
@@ -68,7 +134,7 @@ onMounted(() => {
         <p class="kicker">{{ TEXT.kicker }}</p>
         <h1>{{ TEXT.title }}</h1>
       </div>
-      <button class="btn ghost" :disabled="loading" @click="loadPublicItineraries">
+      <button class="btn ghost" :disabled="loading" @click="loadExploreData">
         {{ loading ? TEXT.refreshing : TEXT.refresh }}
       </button>
     </header>
@@ -84,6 +150,65 @@ onMounted(() => {
     <p class="subtle">{{ TEXT.intro }}</p>
     <p v-if="error" class="error">{{ error }}</p>
 
+    <section class="explore-insights">
+      <article class="panel-card insight-card">
+        <div class="insight-head">
+          <h2>{{ TEXT.heatTitle }}</h2>
+          <p class="subtle">{{ TEXT.heatHint }}</p>
+        </div>
+        <div v-if="heatPoints.length === 0" class="empty-note">{{ TEXT.emptyDesc }}</div>
+        <ol v-else class="heat-list">
+          <li v-for="point in heatPoints" :key="point.poi_id" class="heat-item">
+            <div class="heat-meta">
+              <strong>{{ point.name }}</strong>
+              <span>{{ point.heat_score }}</span>
+            </div>
+            <div class="heat-bar-track">
+              <span class="heat-bar-fill" :style="{ width: heatBarWidth(point.heat_score) }" />
+            </div>
+          </li>
+        </ol>
+      </article>
+
+      <article class="panel-card insight-card">
+        <div class="insight-head">
+          <h2>{{ TEXT.trendTitle }}</h2>
+          <p class="subtle">{{ TEXT.trendHint }}</p>
+        </div>
+        <div v-if="trendItems.length === 0" class="empty-note">{{ TEXT.emptyDesc }}</div>
+        <ol v-else class="trend-list">
+          <li v-for="(itinerary, index) in trendItems" :key="itinerary.id" class="trend-item">
+            <span class="trend-rank">#{{ index + 1 }}</span>
+            <div class="trend-body">
+              <h3>{{ itinerary.title }}</h3>
+              <p class="subtle">{{ itinerary.destination }} · {{ itinerary.days }} {{ TEXT.daySuffix }}</p>
+              <p class="subtle">{{ TEXT.forked }}：{{ itinerary.forked_count }}</p>
+              <p class="subtle">{{ formatRecentVisitLabel(itinerary.last_visited_at) }}</p>
+            </div>
+            <RouterLink class="btn ghost" :to="`/itineraries/${itinerary.id}`">{{ TEXT.detail }}</RouterLink>
+          </li>
+        </ol>
+      </article>
+    </section>
+
+    <section v-if="showRecommendation" class="panel-card recommendation-panel">
+      <div class="insight-head">
+        <h2>{{ TEXT.recommendationTitle }}</h2>
+        <p class="subtle">{{ TEXT.recommendationHint }}</p>
+      </div>
+      <div class="recommendation-list">
+        <article v-for="item in recommendationItems" :key="item.itinerary.id" class="recommendation-card">
+          <h3>{{ item.itinerary.title }}</h3>
+          <p class="subtle">{{ item.itinerary.destination }} · {{ item.itinerary.days }} {{ TEXT.daySuffix }}</p>
+          <p class="subtle">{{ formatRecentVisitLabel(item.itinerary.last_visited_at) }}</p>
+          <div class="reason-tags">
+            <span v-for="reason in item.reasons" :key="reason" class="reason-tag">{{ reason }}</span>
+          </div>
+          <RouterLink class="btn primary" :to="`/itineraries/${item.itinerary.id}`">{{ TEXT.detail }}</RouterLink>
+        </article>
+      </div>
+    </section>
+
     <section v-if="hasData" class="explore-grid">
       <article v-for="itinerary in itineraries" :key="itinerary.id" class="explore-card">
         <div
@@ -94,6 +219,8 @@ onMounted(() => {
           <h2>{{ itinerary.title }}</h2>
           <p class="subtle">{{ itinerary.destination }} · {{ itinerary.days }} {{ TEXT.daySuffix }}</p>
           <p class="subtle">{{ TEXT.author }}：{{ itinerary.author_nickname }}</p>
+          <p class="subtle">{{ TEXT.forked }}：{{ itinerary.forked_count }}</p>
+          <p class="visit-tag">{{ formatRecentVisitLabel(itinerary.last_visited_at) }}</p>
           <RouterLink class="btn primary" :to="`/itineraries/${itinerary.id}`">{{ TEXT.detail }}</RouterLink>
         </div>
       </article>

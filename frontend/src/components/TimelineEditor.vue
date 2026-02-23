@@ -11,6 +11,7 @@ const props = defineProps<{
   items: TimelineDraftItem[];
   activeDay: number;
   activeItemClientId: string;
+  remoteCursors: Map<string, { clientId: string; timestamp: number }>;
   pois: PoiResponse[];
   poiLoading: boolean;
   poiError: string;
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   (event: "patch-item", payload: { clientId: string; patch: TimelineItemPatch }): void;
   (event: "reorder-day", payload: { dayIndex: number; orderedClientIds: string[] }): void;
   (event: "add-item", payload: AddTimelineBlockPayload): void;
+  (event: "add-day"): void;
 }>();
 
 const showAddDialog = ref(false);
@@ -93,6 +95,14 @@ function handleConfirmAdd(payload: AddTimelineBlockPayload) {
       >
         Day {{ day }}
       </button>
+      <button
+        type="button"
+        class="day-tab add-day"
+        title="添加新的一天"
+        @click="emit('add-day')"
+      >
+        +
+      </button>
     </nav>
 
     <p
@@ -114,6 +124,7 @@ function handleConfirmAdd(payload: AddTimelineBlockPayload) {
         <TimelineBlock
           :item="element"
           :active="element.clientId === activeItemClientId"
+          :remote-cursors="props.remoteCursors"
           @select="emit('select-item', $event)"
           @delete="emit('delete-item', $event)"
           @patch="emit('patch-item', $event)"

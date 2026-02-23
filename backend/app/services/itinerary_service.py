@@ -1,22 +1,30 @@
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
+from app.core.config import get_settings
 from app.models.itinerary import Itinerary
 from app.models.itinerary_diff_action import ItineraryDiffAction
 from app.models.itinerary_fork import ItineraryFork
 from app.models.itinerary_item import ItineraryItem
 from app.models.itinerary_snapshot import ItinerarySnapshot
+from app.models.itinerary_visit_log import ItineraryVisitLog
 from app.models.poi import Poi
 from app.models.poi_ticket_rule import PoiTicketRule
 from app.models.pricing_audience import PricingAudience
 from app.models.user import User
 from app.schemas.itinerary import (
+    ExploreHeatPointListResponse,
+    ExploreHeatPointResponse,
+    ExploreRecommendationItemResponse,
+    ExploreRecommendationListResponse,
+    ExploreVisitLogResponse,
     ForkItineraryResponse,
     ItineraryCreate,
     ItineraryDiffActionBatchRequest,
@@ -40,6 +48,7 @@ from app.schemas.itinerary import (
     ItineraryUpdate,
     PublicItineraryListResponse,
     PublicItineraryResponse,
+    PublicItineraryShareMetaResponse,
 )
 from app.services.collab_service import resolve_itinerary_access
 from app.services.notification_service import notify_source_itinerary_updated
@@ -62,6 +71,7 @@ _ITEM_DIFF_FIELDS = (
     "tips",
 )
 _DIFF_ACTIONS = {"applied", "rolled_back", "ignored", "read"}
+settings = get_settings()
 
 
 def _ensure_status(value: str) -> str:
@@ -127,6 +137,7 @@ def _public_itinerary_to_response(
     row: Itinerary,
     author_nickname: str,
     forked_count: int = 0,
+    last_visited_at: datetime | None = None,
 ) -> PublicItineraryResponse:
     return PublicItineraryResponse(
         id=row.id,
@@ -138,6 +149,7 @@ def _public_itinerary_to_response(
         cover_image_url=row.cover_image_url,
         author_nickname=author_nickname,
         forked_count=forked_count,
+        last_visited_at=last_visited_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -203,6 +215,173 @@ def _get_fork_source_meta_map(
         forked_id: (source_id, nickname, title)
         for forked_id, source_id, nickname, title in rows
     }
+
+
+def _get_forked_count_map(
+    db: Session,
+    source_itinerary_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not source_itinerary_ids:
+        return {}
+    stmt = (
+        select(
+            ItineraryFork.source_itinerary_id,
+            func.count(ItineraryFork.id),
+        )
+        .where(ItineraryFork.source_itinerary_id.in_(source_itinerary_ids))
+        .group_by(ItineraryFork.source_itinerary_id)
+    )
+    rows = db.execute(stmt).all()
+    return {
+        source_id: int(forked_count)
+        for source_id, forked_count in rows
+    }
+
+
+def _get_last_viewed_map(db: Session, itinerary_ids: list[UUID]) -> dict[UUID, datetime]:
+    if not itinerary_ids:
+        return {}
+    stmt = (
+        select(ItineraryVisitLog.itinerary_id, func.max(ItineraryVisitLog.last_viewed_at))
+        .where(ItineraryVisitLog.itinerary_id.in_(itinerary_ids))
+        .group_by(ItineraryVisitLog.itinerary_id)
+    )
+    rows = db.execute(stmt).all()
+    return {
+        itinerary_id: last_viewed_at
+        for itinerary_id, last_viewed_at in rows
+        if isinstance(last_viewed_at, datetime)
+    }
+
+
+def _get_total_view_count_map(db: Session, itinerary_ids: list[UUID]) -> dict[UUID, int]:
+    if not itinerary_ids:
+        return {}
+    stmt = (
+        select(ItineraryVisitLog.itinerary_id, func.sum(ItineraryVisitLog.view_count))
+        .where(ItineraryVisitLog.itinerary_id.in_(itinerary_ids))
+        .group_by(ItineraryVisitLog.itinerary_id)
+    )
+    rows = db.execute(stmt).all()
+    return {
+        itinerary_id: int(view_count)
+        for itinerary_id, view_count in rows
+    }
+
+
+def _get_viewed_itinerary_ids(db: Session, viewer_user_id: UUID) -> set[UUID]:
+    stmt = select(ItineraryVisitLog.itinerary_id).where(ItineraryVisitLog.viewer_user_id == viewer_user_id)
+    rows = db.execute(stmt).all()
+    return {itinerary_id for itinerary_id, in rows}
+
+
+def _get_user_preferred_poi_types(db: Session, viewer_user_id: UUID) -> dict[str, int]:
+    stmt = (
+        select(
+            Poi.type,
+            func.sum(ItineraryVisitLog.view_count),
+        )
+        .join(ItineraryItem, ItineraryItem.poi_id == Poi.id)
+        .join(Itinerary, Itinerary.id == ItineraryItem.itinerary_id)
+        .join(ItineraryVisitLog, ItineraryVisitLog.itinerary_id == Itinerary.id)
+        .where(
+            ItineraryVisitLog.viewer_user_id == viewer_user_id,
+            Itinerary.status == "published",
+            Itinerary.visibility == "public",
+        )
+        .group_by(Poi.type)
+    )
+    rows = db.execute(stmt).all()
+    return {poi_type: int(weight) for poi_type, weight in rows}
+
+
+def _get_itinerary_poi_type_count_map(
+    db: Session,
+    itinerary_ids: list[UUID],
+) -> dict[UUID, dict[str, int]]:
+    if not itinerary_ids:
+        return {}
+    stmt = (
+        select(
+            ItineraryItem.itinerary_id,
+            Poi.type,
+            func.count(ItineraryItem.id),
+        )
+        .join(Poi, Poi.id == ItineraryItem.poi_id)
+        .where(ItineraryItem.itinerary_id.in_(itinerary_ids))
+        .group_by(ItineraryItem.itinerary_id, Poi.type)
+    )
+    rows = db.execute(stmt).all()
+    type_map: dict[UUID, dict[str, int]] = {}
+    for itinerary_id, poi_type, type_count in rows:
+        type_map.setdefault(itinerary_id, {})[poi_type] = int(type_count)
+    return type_map
+
+
+def _list_public_itinerary_rows_with_metrics(
+    db: Session,
+    *,
+    offset: int = 0,
+    limit: int | None = None,
+    exclude_itinerary_ids: set[UUID] | None = None,
+) -> list[tuple[Itinerary, str, int, int, datetime | None]]:
+    conditions = (
+        Itinerary.status == "published",
+        Itinerary.visibility == "public",
+    )
+    base = (
+        select(Itinerary, User.nickname)
+        .join(User, User.id == Itinerary.creator_user_id)
+        .where(*conditions)
+        .order_by(Itinerary.created_at.desc())
+        .offset(offset)
+    )
+    if limit is not None:
+        base = base.limit(limit)
+    rows = db.execute(base).all()
+    if not rows:
+        return []
+
+    itinerary_ids = [itinerary.id for itinerary, _nickname in rows]
+    forked_count_map = _get_forked_count_map(db, itinerary_ids)
+    total_view_count_map = _get_total_view_count_map(db, itinerary_ids)
+    last_viewed_map = _get_last_viewed_map(db, itinerary_ids)
+
+    result: list[tuple[Itinerary, str, int, int, datetime | None]] = []
+    for itinerary, nickname in rows:
+        if exclude_itinerary_ids and itinerary.id in exclude_itinerary_ids:
+            continue
+        result.append(
+            (
+                itinerary,
+                nickname,
+                forked_count_map.get(itinerary.id, 0),
+                total_view_count_map.get(itinerary.id, 0),
+                last_viewed_map.get(itinerary.id),
+            )
+        )
+    return result
+
+
+def _sort_public_rows_by_popularity(
+    rows: list[tuple[Itinerary, str, int, int, datetime | None]],
+) -> list[tuple[Itinerary, str, int, int, datetime | None]]:
+    return sorted(
+        rows,
+        key=lambda row: (row[2], row[3], row[0].created_at),
+        reverse=True,
+    )
+
+
+def _build_popularity_reasons(forked_count: int, view_count: int) -> list[str]:
+    reasons: list[str] = []
+    if forked_count > 0:
+        reasons.append(f"被借鉴 {forked_count} 次")
+    if view_count > 0:
+        reasons.append(f"最近浏览 {view_count} 次")
+    if not reasons:
+        reasons.append("社区近期新增")
+    return reasons
 
 
 def _snapshot_item_dict(
@@ -306,6 +485,14 @@ def _ensure_public_itinerary(db: Session, itinerary_id: UUID) -> tuple[Itinerary
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
     return row
+
+
+def _build_public_itinerary_url(itinerary_id: UUID) -> str:
+    return f"{settings.itinerary_share_base_url.rstrip('/')}/{itinerary_id}"
+
+
+def _build_share_card_url(itinerary_id: UUID) -> str:
+    return f"{settings.share_og_base_url.rstrip('/')}/{itinerary_id}"
 
 
 def _item_key(item: dict[str, Any]) -> str:
@@ -465,19 +652,25 @@ def get_itinerary(
 
 
 def list_public_itineraries(db: Session, offset: int, limit: int) -> PublicItineraryListResponse:
-    conditions = (
-        Itinerary.status == "published",
-        Itinerary.visibility == "public",
-    )
-    base = (
-        select(Itinerary, User.nickname)
-        .join(User, User.id == Itinerary.creator_user_id)
-        .where(*conditions)
-    )
-    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
-    rows = db.execute(base.order_by(Itinerary.created_at.desc()).offset(offset).limit(limit)).all()
+    total = db.scalar(
+        select(func.count()).select_from(
+            select(Itinerary.id).where(
+                Itinerary.status == "published",
+                Itinerary.visibility == "public",
+            ).subquery()
+        )
+    ) or 0
+    rows = _list_public_itinerary_rows_with_metrics(db, offset=offset, limit=limit)
     return PublicItineraryListResponse(
-        items=[_public_itinerary_to_response(itinerary, nickname) for itinerary, nickname in rows],
+        items=[
+            _public_itinerary_to_response(
+                itinerary,
+                nickname,
+                forked_count=forked_count,
+                last_visited_at=last_visited_at,
+            )
+            for itinerary, nickname, forked_count, _total_view_count, last_visited_at in rows
+        ],
         total=total,
         offset=offset,
         limit=limit,
@@ -486,7 +679,210 @@ def list_public_itineraries(db: Session, offset: int, limit: int) -> PublicItine
 
 def get_public_itinerary(db: Session, itinerary_id: UUID) -> PublicItineraryResponse:
     itinerary, nickname = _ensure_public_itinerary(db, itinerary_id)
-    return _public_itinerary_to_response(itinerary, nickname)
+    forked_count_map = _get_forked_count_map(db, [itinerary.id])
+    last_viewed_map = _get_last_viewed_map(db, [itinerary.id])
+    return _public_itinerary_to_response(
+        itinerary,
+        nickname,
+        forked_count=forked_count_map.get(itinerary.id, 0),
+        last_visited_at=last_viewed_map.get(itinerary.id),
+    )
+
+
+def record_public_itinerary_view(
+    db: Session, itinerary_id: UUID, current_user: User
+) -> ExploreVisitLogResponse:
+    itinerary, _nickname = _ensure_public_itinerary(db, itinerary_id)
+    stmt = (
+        pg_insert(ItineraryVisitLog)
+        .values(
+            itinerary_id=itinerary.id,
+            viewer_user_id=current_user.id,
+            view_count=1,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ItineraryVisitLog.itinerary_id,
+                ItineraryVisitLog.viewer_user_id,
+            ],
+            set_={
+                "view_count": ItineraryVisitLog.view_count + 1,
+                "last_viewed_at": func.now(),
+                "updated_at": func.now(),
+            },
+        )
+        .returning(ItineraryVisitLog.last_viewed_at, ItineraryVisitLog.view_count)
+    )
+    row = db.execute(stmt).first()
+    db.commit()
+    if row is None:
+        return ExploreVisitLogResponse(
+            itinerary_id=itinerary.id,
+            last_viewed_at=datetime.now(UTC),
+            view_count=1,
+        )
+    return ExploreVisitLogResponse(
+        itinerary_id=itinerary.id,
+        last_viewed_at=row[0],
+        view_count=int(row[1]),
+    )
+
+
+def list_explore_heatmap(db: Session, limit: int) -> ExploreHeatPointListResponse:
+    stmt = (
+        select(
+            Poi.id,
+            Poi.name,
+            func.ST_AsText(Poi.geom),
+            func.sum(ItineraryVisitLog.view_count).label("heat_score"),
+        )
+        .join(ItineraryItem, ItineraryItem.poi_id == Poi.id)
+        .join(Itinerary, Itinerary.id == ItineraryItem.itinerary_id)
+        .join(ItineraryVisitLog, ItineraryVisitLog.itinerary_id == Itinerary.id)
+        .where(
+            Itinerary.status == "published",
+            Itinerary.visibility == "public",
+        )
+        .group_by(Poi.id, Poi.name, Poi.geom)
+        .order_by(func.sum(ItineraryVisitLog.view_count).desc(), Poi.name.asc())
+        .limit(limit)
+    )
+    rows = db.execute(stmt).all()
+    items = []
+    for poi_id, name, poi_wkt, heat_score in rows:
+        longitude, latitude = _parse_point_text(poi_wkt)
+        items.append(
+            ExploreHeatPointResponse(
+                poi_id=poi_id,
+                name=name,
+                longitude=longitude,
+                latitude=latitude,
+                heat_score=int(heat_score),
+            )
+        )
+    return ExploreHeatPointListResponse(items=items)
+
+
+def list_explore_recommendations(
+    db: Session,
+    current_user: User | None,
+    limit: int,
+) -> ExploreRecommendationListResponse:
+    if limit <= 0:
+        return ExploreRecommendationListResponse(items=[])
+
+    if current_user is None:
+        popular_rows = _sort_public_rows_by_popularity(
+            _list_public_itinerary_rows_with_metrics(db)
+        )
+        return ExploreRecommendationListResponse(
+            items=[
+                ExploreRecommendationItemResponse(
+                    itinerary=_public_itinerary_to_response(
+                        itinerary,
+                        nickname,
+                        forked_count=forked_count,
+                        last_visited_at=last_visited_at,
+                    ),
+                    score=float(forked_count + total_view_count),
+                    reasons=_build_popularity_reasons(forked_count, total_view_count),
+                )
+                for itinerary, nickname, forked_count, total_view_count, last_visited_at in popular_rows[:limit]
+            ]
+        )
+
+    viewed_itinerary_ids = _get_viewed_itinerary_ids(db, current_user.id)
+    preference_map = _get_user_preferred_poi_types(db, current_user.id)
+
+    candidate_rows = _list_public_itinerary_rows_with_metrics(
+        db,
+        exclude_itinerary_ids=viewed_itinerary_ids if viewed_itinerary_ids else None,
+    )
+    if not candidate_rows:
+        candidate_rows = _list_public_itinerary_rows_with_metrics(db)
+    if not candidate_rows:
+        return ExploreRecommendationListResponse(items=[])
+
+    popular_rows = _sort_public_rows_by_popularity(candidate_rows)
+    if not preference_map:
+        return ExploreRecommendationListResponse(
+            items=[
+                ExploreRecommendationItemResponse(
+                    itinerary=_public_itinerary_to_response(
+                        itinerary,
+                        nickname,
+                        forked_count=forked_count,
+                        last_visited_at=last_visited_at,
+                    ),
+                    score=float(forked_count + total_view_count),
+                    reasons=_build_popularity_reasons(forked_count, total_view_count),
+                )
+                for itinerary, nickname, forked_count, total_view_count, last_visited_at in popular_rows[:limit]
+            ]
+        )
+
+    itinerary_ids = [itinerary.id for itinerary, _nickname, _forked_count, _view_count, _last_visited_at in candidate_rows]
+    itinerary_type_map = _get_itinerary_poi_type_count_map(db, itinerary_ids)
+
+    scored_items: list[tuple[float, tuple[Itinerary, str, int, int, datetime | None], list[str]]] = []
+    for row in candidate_rows:
+        itinerary, nickname, forked_count, total_view_count, last_visited_at = row
+        type_count_map = itinerary_type_map.get(itinerary.id, {})
+        matched_weights = {
+            poi_type: preference_map.get(poi_type, 0) * poi_count
+            for poi_type, poi_count in type_count_map.items()
+            if preference_map.get(poi_type, 0) > 0
+        }
+        match_score = float(sum(matched_weights.values()))
+        popularity_score = float(forked_count + total_view_count)
+        score = match_score + popularity_score
+
+        reasons: list[str] = []
+        if matched_weights:
+            preferred_type = max(matched_weights.items(), key=lambda item: item[1])[0]
+            reasons.append(f"偏好匹配：{preferred_type}")
+        reasons.extend(_build_popularity_reasons(forked_count, total_view_count))
+        scored_items.append((score, row, reasons))
+
+    scored_items.sort(
+        key=lambda item: (item[0], item[1][2], item[1][3], item[1][0].created_at),
+        reverse=True,
+    )
+
+    return ExploreRecommendationListResponse(
+        items=[
+            ExploreRecommendationItemResponse(
+                itinerary=_public_itinerary_to_response(
+                    row[0],
+                    row[1],
+                    forked_count=row[2],
+                    last_visited_at=row[4],
+                ),
+                score=score,
+                reasons=reasons,
+            )
+            for score, row, reasons in scored_items[:limit]
+        ]
+    )
+
+
+def get_public_itinerary_share_meta(db: Session, itinerary_id: UUID) -> PublicItineraryShareMetaResponse:
+    itinerary, nickname = _ensure_public_itinerary(db, itinerary_id)
+    description = f"{itinerary.destination} · {itinerary.days} 天 · 作者 {nickname}"
+    cover_image_url = itinerary.cover_image_url
+    if not cover_image_url and settings.share_default_cover_url.strip():
+        cover_image_url = settings.share_default_cover_url.strip()
+    return PublicItineraryShareMetaResponse(
+        itinerary_id=itinerary.id,
+        title=itinerary.title,
+        destination=itinerary.destination,
+        days=itinerary.days,
+        author_nickname=nickname,
+        description=description,
+        cover_image_url=cover_image_url,
+        public_url=_build_public_itinerary_url(itinerary.id),
+        share_card_url=_build_share_card_url(itinerary.id),
+    )
 
 
 def fork_public_itinerary(

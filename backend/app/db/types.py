@@ -6,3 +6,10 @@ class GeometryPoint(UserDefinedType):
 
     def get_col_spec(self, **kw: object) -> str:
         return "GEOMETRY(Point,4326)"
+
+
+class GeometryPolygon(UserDefinedType):
+    cache_ok = True
+
+    def get_col_spec(self, **kw: object) -> str:
+        return "GEOMETRY(Polygon,4326)"

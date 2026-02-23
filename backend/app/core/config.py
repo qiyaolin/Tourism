@@ -29,10 +29,19 @@ class Settings(BaseSettings):
     storage_public_base_url: str = "/uploads"
     collab_token_secret: str = "replace-with-dev-collab-secret"
     collab_share_base_url: str = "http://localhost:5173/collab/join"
+    itinerary_share_base_url: str = "http://localhost:5173/itineraries"
+    share_og_base_url: str = "http://localhost:8000/share/itineraries"
+    share_default_cover_url: str = ""
     collab_grant_secret: str = ""
     collab_grant_expires_minutes: int = 120
     collab_redis_url: str = "redis://localhost:6379/2"
     collab_flush_interval_seconds: int = 5
+    territory_grid_size_deg: float = 0.15
+    territory_min_pois: int = 3
+    territory_region_name_prefix: str = "守护区域"
+    guardian_active_window_days: int = 30
+    guardian_reputation_window: int = 30
+    guardian_reputation_threshold: float = 0.7
 
     model_config = SettingsConfigDict(
         env_file=".env",

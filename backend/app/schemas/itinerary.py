@@ -59,6 +59,7 @@ class PublicItineraryResponse(BaseModel):
     cover_image_url: str | None
     author_nickname: str
     forked_count: int = 0
+    last_visited_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -68,6 +69,46 @@ class PublicItineraryListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+class PublicItineraryShareMetaResponse(BaseModel):
+    itinerary_id: UUID
+    title: str
+    destination: str
+    days: int
+    author_nickname: str
+    description: str
+    cover_image_url: str | None
+    public_url: str
+    share_card_url: str
+
+
+class ExploreHeatPointResponse(BaseModel):
+    poi_id: UUID
+    name: str
+    longitude: float
+    latitude: float
+    heat_score: int
+
+
+class ExploreHeatPointListResponse(BaseModel):
+    items: list[ExploreHeatPointResponse]
+
+
+class ExploreRecommendationItemResponse(BaseModel):
+    itinerary: PublicItineraryResponse
+    score: float
+    reasons: list[str]
+
+
+class ExploreRecommendationListResponse(BaseModel):
+    items: list[ExploreRecommendationItemResponse]
+
+
+class ExploreVisitLogResponse(BaseModel):
+    itinerary_id: UUID
+    last_viewed_at: datetime
+    view_count: int
 
 
 class ItineraryItemCreate(BaseModel):

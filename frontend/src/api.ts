@@ -39,8 +39,21 @@ export type PublicItineraryResponse = {
   cover_image_url: string | null;
   author_nickname: string;
   forked_count: number;
+  last_visited_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type PublicItineraryShareMetaResponse = {
+  itinerary_id: string;
+  title: string;
+  destination: string;
+  days: number;
+  author_nickname: string;
+  description: string;
+  cover_image_url: string | null;
+  public_url: string;
+  share_card_url: string;
 };
 
 export type ForkItineraryResponse = {
@@ -129,6 +142,34 @@ export type PublicItineraryListResponse = {
   limit: number;
 };
 
+export type ExploreHeatPointResponse = {
+  poi_id: string;
+  name: string;
+  longitude: number;
+  latitude: number;
+  heat_score: number;
+};
+
+export type ExploreHeatPointListResponse = {
+  items: ExploreHeatPointResponse[];
+};
+
+export type ExploreRecommendationItemResponse = {
+  itinerary: PublicItineraryResponse;
+  score: number;
+  reasons: string[];
+};
+
+export type ExploreRecommendationListResponse = {
+  items: ExploreRecommendationItemResponse[];
+};
+
+export type ExploreVisitLogResponse = {
+  itinerary_id: string;
+  last_viewed_at: string;
+  view_count: number;
+};
+
 export type PoiResponse = {
   id: string;
   name: string;
@@ -201,6 +242,8 @@ export type PoiCorrectionTypeListResponse = {
 export type PoiCorrectionResponse = {
   id: string;
   poi_id: string;
+  territory_id: string | null;
+  territory_name: string | null;
   source_poi_name_snapshot: string | null;
   source_itinerary_id: string | null;
   source_itinerary_title_snapshot: string | null;
@@ -227,6 +270,113 @@ export type PoiCorrectionListResponse = {
   offset: number;
   limit: number;
 };
+
+export type BadgeDefResponse = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  icon_url: string | null;
+};
+
+export type UserBadgeResponse = {
+  id: string;
+  badge_id: string;
+  created_at: string;
+  badge_def: BadgeDefResponse;
+};
+
+export type UserContributionResponse = {
+  id: string;
+  action_type: string;
+  points: number;
+  created_at: string;
+  source_id: string | null;
+};
+
+export type PassportResponse = {
+  user_id: string;
+  total_points: number;
+  level: number;
+  badges: UserBadgeResponse[];
+  recent_contributions: UserContributionResponse[];
+};
+
+export type TerritoryGuardianBrief = {
+  user_id: string;
+  nickname: string;
+  state: "active" | "honorary" | "suspended";
+  granted_at: string;
+};
+
+export type TerritoryRegionResponse = {
+  id: string;
+  code: string;
+  name: string;
+  status: "active" | "inactive";
+  poi_count: number;
+  boundary_wkt: string;
+  centroid_wkt: string;
+  guardians: TerritoryGuardianBrief[];
+};
+
+export type TerritoryRegionListResponse = {
+  items: TerritoryRegionResponse[];
+};
+
+export type TerritoryGuardianApplicationResponse = {
+  id: string;
+  territory_id: string;
+  territory_name: string;
+  applicant_user_id: string;
+  applicant_nickname: string;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewer_user_id: string | null;
+  reviewer_nickname: string | null;
+  review_comment: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+export type TerritoryGuardianApplicationListResponse = {
+  items: TerritoryGuardianApplicationResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type TerritoryRebuildResponse = {
+  generated_regions: number;
+  assigned_pois: number;
+  inactive_regions: number;
+};
+
+export type TerritoryGuardianCheckInResponse = {
+  territory_id: string;
+  guardian_user_id: string;
+  checked_in_at: string;
+};
+
+export type TerritoryGuardianReputationItemResponse = {
+  guardian_id: string;
+  territory_id: string;
+  territory_name: string;
+  guardian_user_id: string;
+  guardian_nickname: string;
+  guardian_state: "active" | "honorary" | "suspended";
+  reviewed_count: number;
+  accepted_count: number;
+  accuracy: number;
+  threshold: number;
+  status: "ok" | "suspended";
+  calculated_at: string;
+};
+
+export type TerritoryGuardianReputationListResponse = {
+  items: TerritoryGuardianReputationItemResponse[];
+};
+
 
 export type PoiCorrectionReviewResponse = {
   correction: PoiCorrectionResponse;
@@ -678,6 +828,114 @@ export async function fetchReviewCorrections(
   return parseJsonResponse<PoiCorrectionListResponse>(response, "List review corrections request");
 }
 
+export async function fetchTerritories(): Promise<TerritoryRegionListResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories`);
+  return parseJsonResponse<TerritoryRegionListResponse>(response, "List territories request");
+}
+
+export async function fetchTerritory(territoryId: string): Promise<TerritoryRegionResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/${territoryId}`);
+  return parseJsonResponse<TerritoryRegionResponse>(response, "Get territory request");
+}
+
+export async function submitTerritoryApplication(
+  token: string,
+  payload: { territory_id: string; reason?: string | null }
+): Promise<TerritoryGuardianApplicationResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/applications`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<TerritoryGuardianApplicationResponse>(
+    response,
+    "Submit territory application request"
+  );
+}
+
+export async function territoryGuardianCheckIn(
+  territoryId: string,
+  token: string
+): Promise<TerritoryGuardianCheckInResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/${territoryId}/check-in`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<TerritoryGuardianCheckInResponse>(
+    response,
+    "Territory guardian check-in request"
+  );
+}
+
+export async function fetchAdminTerritoryApplications(
+  token: string,
+  status: "pending" | "approved" | "rejected" | "all" = "pending",
+  offset = 0,
+  limit = 50
+): Promise<TerritoryGuardianApplicationListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/admin/territories/applications?status=${status}&offset=${offset}&limit=${limit}`,
+    { headers: authHeaders(token) }
+  );
+  return parseJsonResponse<TerritoryGuardianApplicationListResponse>(
+    response,
+    "List admin territory applications request"
+  );
+}
+
+export async function reviewAdminTerritoryApplication(
+  applicationId: string,
+  token: string,
+  payload: { action: "approve" | "reject"; review_comment?: string | null }
+): Promise<TerritoryGuardianApplicationResponse> {
+  const response = await fetch(`${API_BASE_URL}/admin/territories/applications/${applicationId}/review`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<TerritoryGuardianApplicationResponse>(
+    response,
+    "Review admin territory application request"
+  );
+}
+
+export async function rebuildTerritories(token: string): Promise<TerritoryRebuildResponse> {
+  const response = await fetch(`${API_BASE_URL}/admin/territories/rebuild`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<TerritoryRebuildResponse>(response, "Rebuild territories request");
+}
+
+export async function fetchGuardianReputation(
+  token: string
+): Promise<TerritoryGuardianReputationListResponse> {
+  const response = await fetch(`${API_BASE_URL}/admin/territories/guardians/reputation`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<TerritoryGuardianReputationListResponse>(
+    response,
+    "List guardian reputation request"
+  );
+}
+
+export async function resumeGuardian(guardianId: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/admin/territories/guardians/${guardianId}/resume`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Resume guardian request failed with ${response.status}. Response: ${text.slice(0, 120)}`);
+  }
+}
+
 export async function reviewPoiCorrection(
   correctionId: string,
   token: string,
@@ -777,12 +1035,13 @@ export async function fetchCollabHistory(
   itineraryId: string,
   token: string,
   offset = 0,
-  limit = 50
+  limit = 50,
+  collabGrant?: string
 ): Promise<CollabHistoryListResponse> {
   const response = await fetch(
     `${API_BASE_URL}/itineraries/${itineraryId}/collab/history?offset=${offset}&limit=${limit}`,
     {
-      headers: authHeaders(token)
+      headers: authHeaders(token, collabGrant)
     }
   );
   return parseJsonResponse<CollabHistoryListResponse>(response, "List collab history request");
@@ -828,9 +1087,29 @@ export async function fetchPublicItineraries(offset = 0, limit = 20): Promise<Pu
   return parseJsonResponse<PublicItineraryListResponse>(response, "List public itineraries request");
 }
 
+export async function fetchExploreHeatmap(limit = 20): Promise<ExploreHeatPointListResponse> {
+  const response = await fetch(`${API_BASE_URL}/explore/heatmap?limit=${limit}`);
+  return parseJsonResponse<ExploreHeatPointListResponse>(response, "List explore heatmap request");
+}
+
+export async function fetchExploreRecommendations(
+  limit = 12,
+  token?: string
+): Promise<ExploreRecommendationListResponse> {
+  const response = await fetch(`${API_BASE_URL}/explore/recommendations?limit=${limit}`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<ExploreRecommendationListResponse>(response, "List explore recommendations request");
+}
+
 export async function fetchPublicItinerary(itineraryId: string): Promise<PublicItineraryResponse> {
   const response = await fetch(`${API_BASE_URL}/explore/itineraries/${itineraryId}`);
   return parseJsonResponse<PublicItineraryResponse>(response, "Get public itinerary request");
+}
+
+export async function fetchPublicItineraryShareMeta(itineraryId: string): Promise<PublicItineraryShareMetaResponse> {
+  const response = await fetch(`${API_BASE_URL}/explore/itineraries/${itineraryId}/share-meta`);
+  return parseJsonResponse<PublicItineraryShareMetaResponse>(response, "Get public itinerary share meta request");
 }
 
 export async function fetchPublicItineraryItemsWithPoi(
@@ -846,6 +1125,17 @@ export async function forkPublicItinerary(itineraryId: string, token: string): P
     headers: authHeaders(token)
   });
   return parseJsonResponse<ForkItineraryResponse>(response, "Fork public itinerary request");
+}
+
+export async function recordPublicItineraryView(
+  itineraryId: string,
+  token: string
+): Promise<ExploreVisitLogResponse> {
+  const response = await fetch(`${API_BASE_URL}/explore/itineraries/${itineraryId}/view`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<ExploreVisitLogResponse>(response, "Record public itinerary view request");
 }
 
 export async function fetchItineraryDiff(itineraryId: string, token: string): Promise<ItineraryDiffResponse> {
@@ -990,3 +1280,9 @@ export async function importAiPlan(payload: AiImportRequest, token: string): Pro
   return parseJsonResponse<AiImportResponse>(response, "Import AI plan request");
 }
 
+export async function fetchMyPassport(token: string): Promise<PassportResponse> {
+  const response = await fetch(`${API_BASE_URL}/passports/me`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<PassportResponse>(response, "Fetch my passport request");
+}

@@ -212,6 +212,16 @@ class CollabRuntime:
             return maybe_origin.strip()
         return "local"
 
+    @staticmethod
+    def _origin_description(origin: str) -> str:
+        mapping = {
+            "draft-items": "\u66f4\u65b0\u4e86\u65f6\u95f4\u8f74\u5185\u5bb9",
+            "start-date": "\u66f4\u65b0\u4e86\u5f00\u59cb\u65e5\u671f",
+            "local-sync": "\u7f16\u8f91\u4e86\u534f\u4f5c\u5185\u5bb9",
+            "local": "\u7f16\u8f91\u4e86\u5185\u5bb9",
+        }
+        return mapping.get(origin, "\u7f16\u8f91\u4e86\u534f\u4f5c\u5185\u5bb9")
+
     async def _persist_update_direct(
         self,
         conn: RuntimeConnection,
@@ -237,25 +247,34 @@ class CollabRuntime:
             db.add(doc_row)
 
             if origin not in {"bootstrap", "seed"}:
-                actor_user_id = conn.identity.actor_user_id
-                db.add(
-                    ItineraryCollabEventLog(
-                        itinerary_id=conn.itinerary_id,
-                        actor_type=conn.identity.participant_type,
-                        actor_user_id=actor_user_id,
-                        guest_name=conn.identity.guest_name,
-                        event_type="content_sync",
-                        target_type="document",
-                        target_id=str(conn.itinerary_id),
-                        payload={
-                            "bytes": len(update_bytes),
-                            "updates": 1,
-                            "origin_counts": {origin: 1},
-                            "origin": origin,
-                            "session_ids": [conn.connection_id],
-                        },
+                # Skip history logging for regular sync updates (tagged by frontend)
+                skip_history = False
+                if isinstance(event_meta, dict) and event_meta.get("skip_history"):
+                    skip_history = True
+                if not skip_history:
+                    actor_user_id = conn.identity.actor_user_id
+                    # Prefer custom description from frontend 10s diff timer
+                    custom_desc = event_meta.get("description") if isinstance(event_meta, dict) else None
+                    description = custom_desc if isinstance(custom_desc, str) and custom_desc.strip() else self._origin_description(origin)
+                    db.add(
+                        ItineraryCollabEventLog(
+                            itinerary_id=conn.itinerary_id,
+                            actor_type=conn.identity.participant_type,
+                            actor_user_id=actor_user_id,
+                            guest_name=conn.identity.guest_name,
+                            event_type="content_sync",
+                            target_type="document",
+                            target_id=str(conn.itinerary_id),
+                            payload={
+                                "bytes": len(update_bytes),
+                                "updates": 1,
+                                "origin_counts": {origin: 1},
+                                "origin": origin,
+                                "description": description,
+                                "session_ids": [conn.connection_id],
+                            },
+                        )
                     )
-                )
             db.commit()
 
     async def _load_document_snapshot(self, itinerary_id: UUID) -> tuple[str | None, bool]:
@@ -354,7 +373,7 @@ class CollabRuntime:
                 group_key = (actor_type, actor_user_id, guest_value)
                 group = grouped_events.setdefault(
                     group_key,
-                    {"bytes": 0, "updates": 0, "origin_counts": {}, "session_ids": set()},
+                    {"bytes": 0, "updates": 0, "origin_counts": {}, "session_ids": set(), "descriptions": [], "all_skip_history": True},
                 )
                 group["bytes"] += len(update_bytes)
                 group["updates"] += 1
@@ -363,11 +382,37 @@ class CollabRuntime:
                 session_id = payload.get("session_id")
                 if isinstance(session_id, str) and session_id:
                     group["session_ids"].add(session_id)
+                # Keep track of custom frontend diff descriptions
+                if isinstance(meta, dict):
+                    custom_desc = meta.get("description")
+                    if isinstance(custom_desc, str) and custom_desc.strip():
+                        group["descriptions"].append(custom_desc.strip())
+                    if not meta.get("skip_history"):
+                        group["all_skip_history"] = False
+                else:
+                    group["all_skip_history"] = False
                 applied += 1
 
             for (actor_type, actor_user_id_raw, guest_name), aggregate in grouped_events.items():
                 actor_user_id = UUID(actor_user_id_raw) if actor_user_id_raw else None
                 session_ids = sorted(list(aggregate["session_ids"]))
+                dominant_origin = max(
+                    aggregate["origin_counts"].items(),
+                    key=lambda item: item[1],
+                )[0] if aggregate["origin_counts"] else "local"
+
+                # Use aggregated custom descriptions if available, else fallback
+                # If ALL updates in the group were skip_history and no descriptions, skip logging entirely
+                if aggregate.get("all_skip_history", False) and not aggregate["descriptions"]:
+                    continue
+
+                if aggregate["descriptions"]:
+                    description = "；".join(aggregate["descriptions"][:3]) # Limit to 3 changes to avoid bloat
+                    if len(aggregate["descriptions"]) > 3:
+                        description += " 等"
+                else:
+                    description = self._origin_description(dominant_origin)
+
                 db.add(
                     ItineraryCollabEventLog(
                         itinerary_id=itinerary_id,
@@ -381,12 +426,8 @@ class CollabRuntime:
                             "bytes": int(aggregate["bytes"]),
                             "updates": int(aggregate["updates"]),
                             "origin_counts": aggregate["origin_counts"],
-                            "origin": max(
-                                aggregate["origin_counts"].items(),
-                                key=lambda item: item[1],
-                            )[0]
-                            if aggregate["origin_counts"]
-                            else "local",
+                            "origin": dominant_origin,
+                            "description": description,
                             "session_ids": session_ids,
                         },
                     )

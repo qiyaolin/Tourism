@@ -1,4 +1,5 @@
 ﻿import json
+import logging
 import re
 from datetime import UTC, datetime
 from io import BytesIO
@@ -17,6 +18,7 @@ from app.models.poi_correction_notification import PoiCorrectionNotification
 from app.models.poi_correction_type import PoiCorrectionType
 from app.models.poi_ticket_rule import PoiTicketRule
 from app.models.pricing_audience import PricingAudience
+from app.models.territory import TerritoryRegion
 from app.models.user import User
 from app.schemas.poi_correction import (
     PoiCorrectionListResponse,
@@ -26,7 +28,16 @@ from app.schemas.poi_correction import (
     PoiCorrectionTypeResponse,
 )
 from app.services.notification_service import notify_correction_accepted
+from app.services.passport_service import evaluate_badges, record_contribution
 from app.services.storage import get_storage_provider
+from app.services.territory_service import (
+    active_guardian_territory_ids,
+    can_review_correction_in_territory,
+    evaluate_guardian_governance,
+    log_guardian_review_activity,
+)
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_IMAGE_TYPES = {
     "image/jpeg": "jpg",
@@ -76,10 +87,17 @@ def _to_type_response(row: PoiCorrectionType) -> PoiCorrectionTypeResponse:
     )
 
 
-def _to_response(row: PoiCorrection, correction_type: PoiCorrectionType) -> PoiCorrectionResponse:
+def _to_response(
+    row: PoiCorrection,
+    correction_type: PoiCorrectionType,
+    territory_id: UUID | None = None,
+    territory_name: str | None = None,
+) -> PoiCorrectionResponse:
     return PoiCorrectionResponse(
         id=row.id,
         poi_id=row.poi_id,
+        territory_id=territory_id,
+        territory_name=territory_name,
         source_poi_name_snapshot=row.source_poi_name_snapshot,
         source_itinerary_id=row.source_itinerary_id,
         source_itinerary_title_snapshot=row.source_itinerary_title_snapshot,
@@ -348,7 +366,28 @@ def list_my_corrections(
             )
         ).all()
     }
-    items = [_to_response(row, type_map[row.type_id]) for row in rows if row.type_id in type_map]
+    poi_ids = {row.poi_id for row in rows}
+    poi_territory_map = {
+        poi_id: territory_id
+        for poi_id, territory_id in db.execute(
+            select(Poi.id, Poi.territory_id).where(Poi.id.in_(poi_ids))
+        ).all()
+    }
+    territory_ids = {territory_id for territory_id in poi_territory_map.values() if territory_id is not None}
+    territory_name_map = {
+        row.id: row.name
+        for row in db.scalars(select(TerritoryRegion).where(TerritoryRegion.id.in_(territory_ids))).all()
+    }
+    items = [
+        _to_response(
+            row,
+            type_map[row.type_id],
+            territory_id=poi_territory_map.get(row.poi_id),
+            territory_name=territory_name_map.get(poi_territory_map.get(row.poi_id)),
+        )
+        for row in rows
+        if row.type_id in type_map
+    ]
     return PoiCorrectionListResponse(items=items, total=total, offset=offset, limit=limit)
 
 
@@ -358,11 +397,21 @@ def list_review_corrections(
     offset: int,
     limit: int,
 ) -> PoiCorrectionListResponse:
-    base = select(PoiCorrection).where(
+    evaluate_guardian_governance(db)
+    if current_user.role == "admin":
+        territory_filter_ids: list[UUID] = []
+    else:
+        territory_filter_ids = active_guardian_territory_ids(db, current_user.id)
+    base = select(PoiCorrection).join(Poi, Poi.id == PoiCorrection.poi_id).where(
         PoiCorrection.status == "pending",
         (PoiCorrection.reviewer_user_id == current_user.id)
         | (PoiCorrection.reviewer_user_id.is_(None)),
     )
+    if current_user.role != "admin":
+        if territory_filter_ids:
+            base = base.where(Poi.territory_id.in_(territory_filter_ids))
+        else:
+            base = base.where(Poi.territory_id.is_(None))
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.scalars(
         base.order_by(PoiCorrection.created_at.desc()).offset(offset).limit(limit)
@@ -377,7 +426,28 @@ def list_review_corrections(
             )
         ).all()
     }
-    items = [_to_response(row, type_map[row.type_id]) for row in rows if row.type_id in type_map]
+    poi_ids = {row.poi_id for row in rows}
+    poi_territory_map = {
+        poi_id: territory_id
+        for poi_id, territory_id in db.execute(
+            select(Poi.id, Poi.territory_id).where(Poi.id.in_(poi_ids))
+        ).all()
+    }
+    territory_ids = {territory_id for territory_id in poi_territory_map.values() if territory_id is not None}
+    territory_name_map = {
+        row.id: row.name
+        for row in db.scalars(select(TerritoryRegion).where(TerritoryRegion.id.in_(territory_ids))).all()
+    }
+    items = [
+        _to_response(
+            row,
+            type_map[row.type_id],
+            territory_id=poi_territory_map.get(row.poi_id),
+            territory_name=territory_name_map.get(poi_territory_map.get(row.poi_id)),
+        )
+        for row in rows
+        if row.type_id in type_map
+    ]
     return PoiCorrectionListResponse(items=items, total=total, offset=offset, limit=limit)
 
 
@@ -388,7 +458,10 @@ def review_correction(
     review_comment: str | None,
     current_user: User,
 ) -> PoiCorrectionReviewResponse:
-    correction = db.get(PoiCorrection, correction_id)
+    evaluate_guardian_governance(db)
+    correction = db.scalars(
+        select(PoiCorrection).where(PoiCorrection.id == correction_id).with_for_update()
+    ).first()
     if correction is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Correction not found")
     if correction.status != "pending":
@@ -409,6 +482,15 @@ def review_correction(
     poi = db.get(Poi, correction.poi_id)
     if poi is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
+    territory_name: str | None = None
+    if poi.territory_id is not None:
+        territory = db.get(TerritoryRegion, poi.territory_id)
+        territory_name = territory.name if territory else None
+    if not can_review_correction_in_territory(db, current_user, poi.territory_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to review corrections outside your territory",
+        )
 
     correction.status = action
     correction.reviewer_user_id = current_user.id
@@ -429,6 +511,8 @@ def review_correction(
             db.add(poi)
             poi_updated = True
             db.add(correction)
+            if poi.territory_id is not None and current_user.role != "admin":
+                log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
             notify_correction_accepted(
                 db,
                 correction=correction,
@@ -439,7 +523,13 @@ def review_correction(
             db.commit()
             db.refresh(correction)
             return PoiCorrectionReviewResponse(
-                correction=_to_response(correction, correction_type), poi_updated=poi_updated
+                correction=_to_response(
+                    correction,
+                    correction_type,
+                    territory_id=poi.territory_id,
+                    territory_name=territory_name,
+                ),
+                poi_updated=poi_updated,
             )
 
         before_rule_count = db.scalar(
@@ -448,7 +538,7 @@ def review_correction(
             .where(PoiTicketRule.poi_id == poi.id, PoiTicketRule.is_active.is_(True))
         ) or 0
         correction.before_snapshot = {
-            "ticket_price": poi.ticket_price,
+            "ticket_price": float(poi.ticket_price) if poi.ticket_price is not None else None,
             "ticket_rule_count": before_rule_count,
         }
 
@@ -502,14 +592,28 @@ def review_correction(
             .where(PoiTicketRule.poi_id == poi.id, PoiTicketRule.is_active.is_(True))
         ) or 0
         correction.after_snapshot = {
-            "ticket_price": poi.ticket_price,
+            "ticket_price": float(poi.ticket_price) if poi.ticket_price is not None else None,
             "ticket_rule_count": after_rule_count,
         }
         db.add(poi)
         poi_updated = True
 
     db.add(correction)
+    if poi.territory_id is not None and current_user.role != "admin":
+        log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
     if action == "accepted":
+        try:
+            record_contribution(
+                session=db,
+                user_id=correction.submitter_user_id,
+                action_type="correction_accepted",
+                points=10,
+                source_id=correction.id
+            )
+            evaluate_badges(session=db, user_id=correction.submitter_user_id)
+        except Exception as e:
+            logger.error(f"Failed to record contribution for correction {correction.id}: {e}")
+
         notify_correction_accepted(
             db,
             correction=correction,
@@ -520,5 +624,11 @@ def review_correction(
     db.commit()
     db.refresh(correction)
     return PoiCorrectionReviewResponse(
-        correction=_to_response(correction, correction_type), poi_updated=poi_updated
+        correction=_to_response(
+            correction,
+            correction_type,
+            territory_id=poi.territory_id,
+            territory_name=territory_name,
+        ),
+        poi_updated=poi_updated,
     )

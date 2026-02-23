@@ -15,7 +15,10 @@ const TEXT = {
   signal: "\u9884\u8b66\u4e2d\u5fc3",
   traveler: "\u65c5\u884c\u8005",
   logout: "\u9000\u51fa",
-  login: "\u767b\u5f55"
+  login: "\u767b\u5f55",
+  passport: "数字护照",
+  territories: "领地计划",
+  territoryAdmin: "守护审核"
 } as const;
 
 const route = useRoute();
@@ -74,6 +77,15 @@ watch(
           <RouterLink :class="['site-link', { active: isActive('/notifications') }]" to="/notifications">
             {{ TEXT.signal }}
             <span v-if="unreadCount > 0" class="nav-badge">{{ unreadCount }}</span>
+          </RouterLink>
+          <RouterLink :class="['site-link', { active: isActive('/passport') }]" to="/passport">{{ TEXT.passport }}</RouterLink>
+          <RouterLink :class="['site-link', { active: isActive('/territories') }]" to="/territories">{{ TEXT.territories }}</RouterLink>
+          <RouterLink
+            v-if="user?.role === 'admin'"
+            :class="['site-link', { active: isActive('/admin/territories/review') }]"
+            to="/admin/territories/review"
+          >
+            {{ TEXT.territoryAdmin }}
           </RouterLink>
         </nav>
         <div class="site-user">

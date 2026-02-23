@@ -25,6 +25,8 @@ class PoiCorrectionTypeListResponse(BaseModel):
 class PoiCorrectionResponse(BaseModel):
     id: UUID
     poi_id: UUID
+    territory_id: UUID | None = None
+    territory_name: str | None = None
     source_poi_name_snapshot: str | None
     source_itinerary_id: UUID | None
     source_itinerary_title_snapshot: str | None

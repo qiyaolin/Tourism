@@ -488,3 +488,32 @@
   - 变更：定位根因为 Redis 不可用（`localhost:6379` 拒绝连接）导致 `collab:update` 路径抛异常并中断 WS；后端改为 Redis 可选：写 Redis 失败时自动降级为数据库直写并继续广播，不再中断实时链路；前端 `seed` 同步改为显式 `origin=seed`，避免初始化噪声被误记为有效编辑历史。
   - 结论：在无 Redis 环境下，实时协作链路与协作历史链路可继续工作，历史不再依赖页面刷新后才出现。
   - 风险：当前环境未启 Redis，历史写入策略为“逐条直写”而非批量聚合；若后续启用 Redis，将自动恢复批处理路径。
+
+## Session Update (2026-02-23 Phase 3.1 Final Closure)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.1-002 | Phase 3.1 | 手动实现质量核验（门禁 + 功能对齐） | done | codex | 2026-02-23T12:44:16.7001075-05:00 | `PROGRESS.md`, `backend/app/security/deps.py`, `backend/app/models/itinerary_visit_log.py`, `backend/app/models/__init__.py`, `backend/alembic/versions/20260223_0014_create_itinerary_visit_logs.py`, `backend/app/schemas/itinerary.py`, `backend/app/services/itinerary_service.py`, `backend/app/api/v1/explore.py`, `backend/app/api/v1/passports.py`, `backend/tests/test_explore_service.py`, `frontend/src/api.ts`, `frontend/src/pages/ExplorePage.vue`, `frontend/src/pages/PublicItineraryPage.vue`, `frontend/src/styles.css`, `frontend/src/pages/PassportPage.vue` | 后端 ruff/pytest、前端 eslint/lint/build、关键接口联调与三端一致性均通过；用户最终复测确认正常 | 无 | 已收口 |
+| P3-3.1-003 | Phase 3.1 | 数字护照页面中文乱码根因修复（UTF-8链路） | done | codex | 2026-02-23T12:44:16.7001075-05:00 | `frontend/src/pages/PassportPage.vue`, `PROGRESS.md` | 前端构建通过；本地源码/容器源码/在线产物一致；用户最终复测确认正常 | 无 | 已收口 |
+| P3-3.1-004 | Phase 3.1 | Phase 3.1 完整门禁与联调验证执行（收口前复核） | done | codex | 2026-02-23T12:44:16.7001075-05:00 | `PROGRESS.md` | 服务健康、后端/前端门禁、运行态接口联调、三端版本一致性全部通过；用户最终复测确认正常 | 无 | 已收口 |
+| P3-3.1-005 | Phase 3.1 | 全链路写入测试（模拟用户数据写入+回滚清理） | done | codex | 2026-02-23T12:44:16.7001075-05:00 | `backend/scripts/verify_phase3_1_full_write_e2e.py`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/scripts/verify_phase3_1_full_write_e2e.py`=passed；`uv run --project backend python backend/scripts/verify_phase3_1_full_write_e2e.py`=pass；`cleanup_failed_items=[]` | 无 | 已收口 |
+
+### Changelog Addendum
+
+- 2026-02-23T12:44:16.7001075-05:00
+  - 变更：收到用户“确认全部正常”反馈后，完成 Phase 3.1 收口；`P3-3.1-002/003/004/005` 统一从 `test_passed` 收口为 `done`。
+  - 结论：Phase 3.1 满足完成定义（相关门禁、联调、写入回滚验证、用户最终复测确认均通过）。
+  - 风险：无新增 P0 阻塞；下一步进入新 Phase 需求梳理与任务拆分。
+
+## Session Update (2026-02-23 Phase 3.2 Territory Guardian P0+P1 Implementation)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-001 | Phase 3.2 | 领地认领计划 P0+P1 实现（区域自动聚合/守护申请审核/本区域纠错优先/活跃度与信誉治理） | test_passed | codex | 2026-02-23T16:20:00-05:00 | `backend/app/models/territory.py`, `backend/app/services/territory_service.py`, `backend/app/api/v1/territories.py`, `backend/app/api/v1/admin_territories.py`, `backend/app/services/poi_correction_service.py`, `backend/app/schemas/territory.py`, `backend/app/schemas/poi_correction.py`, `backend/app/models/poi.py`, `backend/app/security/deps.py`, `backend/app/core/config.py`, `backend/alembic/versions/20260223_0015_create_territory_guardian_tables.py`, `backend/.env.example`, `frontend/src/api.ts`, `frontend/src/router.ts`, `frontend/src/App.vue`, `frontend/src/pages/TerritoryPage.vue`, `frontend/src/pages/AdminTerritoryReviewPage.vue`, `frontend/src/pages/CorrectionReviewPage.vue`, `frontend/src/styles.css`, `backend/tests/test_territory_service.py`, `backend/tests/test_poi_correction_service.py`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 ...`=passed；`uv run --project backend pytest -q`=45 passed；`uv run --project backend python -m alembic upgrade head`=passed；`uv run --project backend python -m alembic current`=`20260223_0015(head)`；`pnpm --dir frontend lint`=passed(0 error, warnings only)；`pnpm --dir frontend build`=passed；运行态接口联调：`GET /api/v1/territories`=200、`GET /api/v1/admin/territories/applications`(无token)=401；三端一致性：本地源码/容器 `/app`/在线产物 `http://localhost:5173/src/...` 均命中新特征（`TerritoryPage`、`AdminTerritoryReviewPage`、`/admin/territories/review`） | 待用户最终复测 | 请用户关闭旧标签页后重新打开页面，按“区域列表->提交守护申请->管理员审核->守护者巡检打卡->纠错审核区域权限”路径执行运行态复测，通过后可推进 `done` |
+
+### Changelog Addendum
+
+- 2026-02-23T16:20:00-05:00
+  - 变更：新增领地治理数据模型与迁移（`territory_regions`、`territory_guardian_applications`、`territory_guardians`、`territory_guardian_activity_logs`、`territory_guardian_reputation_snapshots`，并新增 `pois.territory_id`）；新增用户端与管理员端 API；前端新增“领地计划”页面与“守护审核”管理页；纠错审核链路接入“本区域守护优先 + 并发抢占保护 + 守护行为日志 + 区域字段回传”。
+  - 结论：Phase 3.2 的 P0+P1 代码实现、自动化门禁、容器迁移与运行态基础联调均通过，当前状态为 `test_passed`。
+  - 风险：尚未完成用户侧最终复测，且当前 lint 仍存在历史存量 warning（非本次新增）。
