@@ -305,7 +305,8 @@ export type PassportResponse = {
 export type TerritoryGuardianBrief = {
   user_id: string;
   nickname: string;
-  state: "active" | "honorary" | "suspended";
+  role: "regular" | "local_expert" | "area_guide" | "city_ambassador";
+  state: "active" | "dormant" | "honorary";
   granted_at: string;
 };
 
@@ -318,6 +319,7 @@ export type TerritoryRegionResponse = {
   boundary_wkt: string;
   centroid_wkt: string;
   guardians: TerritoryGuardianBrief[];
+  sample_pois: string[];
 };
 
 export type TerritoryRegionListResponse = {
@@ -358,23 +360,105 @@ export type TerritoryGuardianCheckInResponse = {
   checked_in_at: string;
 };
 
-export type TerritoryGuardianReputationItemResponse = {
-  guardian_id: string;
+export type UserTerritoryRoleItem = {
   territory_id: string;
   territory_name: string;
-  guardian_user_id: string;
-  guardian_nickname: string;
-  guardian_state: "active" | "honorary" | "suspended";
-  reviewed_count: number;
-  accepted_count: number;
-  accuracy: number;
-  threshold: number;
-  status: "ok" | "suspended";
-  calculated_at: string;
+  role: "regular" | "local_expert" | "area_guide" | "city_ambassador";
+  state: "active" | "dormant" | "honorary";
+  contribution_count: number;
+  thanks_received: number;
+  next_role: string | null;
+  next_role_progress: number;
 };
 
-export type TerritoryGuardianReputationListResponse = {
-  items: TerritoryGuardianReputationItemResponse[];
+export type UserTerritoryProfileResponse = {
+  user_id: string;
+  roles: UserTerritoryRoleItem[];
+  total_contributions: number;
+  total_thanks: number;
+};
+
+export type TaskCenterItem = {
+  task_type: "pending_review" | "poi_verification" | "nearby_opportunity" | "bounty";
+  title: string;
+  territory_name: string;
+  territory_id: string;
+  target_id: string | null;
+  points: number;
+  created_at: string;
+};
+
+export type TaskCenterResponse = {
+  pending_reviews: number;
+  items: TaskCenterItem[];
+  monthly_contributions: number;
+  monthly_helped_count: number;
+}
+
+export interface TerritoryOpportunityResponse {
+  territory_id: string;
+  items: TaskCenterItem[];
+};
+
+export type BountyTaskResponse = {
+  id: string;
+  poi_id: string;
+  poi_name: string;
+  territory_id: string | null;
+  territory_name: string | null;
+  status: "open" | "claimed" | "submitted" | "approved" | "rejected" | "expired";
+  reward_points: number;
+  stale_days_snapshot: number;
+  distance_meters: number | null;
+  generated_at: string;
+  expires_at: string | null;
+  claimed_by_user_id: string | null;
+  claimed_at: string | null;
+};
+
+export type BountyTaskListResponse = {
+  items: BountyTaskResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+  nearby_radius_meters: number | null;
+};
+
+export type BountySubmissionResponse = {
+  id: string;
+  task_id: string;
+  submitter_user_id: string;
+  submit_longitude: number;
+  submit_latitude: number;
+  distance_meters: number;
+  gps_verified: boolean;
+  photo_url: string | null;
+  photo_exif_captured_at: string | null;
+  photo_exif_longitude: number | null;
+  photo_exif_latitude: number | null;
+  risk_level: "normal" | "manual_review";
+  review_status: "pending" | "approved" | "rejected";
+  reviewer_user_id: string | null;
+  review_comment: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  task_status: "open" | "claimed" | "submitted" | "approved" | "rejected" | "expired";
+  poi_name: string;
+  territory_name: string | null;
+  reward_points: number;
+};
+
+export type BountySubmissionListResponse = {
+  items: BountySubmissionResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type BountySubmitResponse = {
+  task: BountyTaskResponse;
+  submission: BountySubmissionResponse;
+  auto_approved: boolean;
 };
 
 
@@ -856,7 +940,7 @@ export async function submitTerritoryApplication(
   );
 }
 
-export async function territoryGuardianCheckIn(
+export async function guardianCheckIn(
   territoryId: string,
   token: string
 ): Promise<TerritoryGuardianCheckInResponse> {
@@ -864,11 +948,9 @@ export async function territoryGuardianCheckIn(
     method: "POST",
     headers: authHeaders(token)
   });
-  return parseJsonResponse<TerritoryGuardianCheckInResponse>(
-    response,
-    "Territory guardian check-in request"
-  );
+  return parseJsonResponse<TerritoryGuardianCheckInResponse>(response, "Guardian check-in request");
 }
+
 
 export async function fetchAdminTerritoryApplications(
   token: string,
@@ -913,27 +995,141 @@ export async function rebuildTerritories(token: string): Promise<TerritoryRebuil
   return parseJsonResponse<TerritoryRebuildResponse>(response, "Rebuild territories request");
 }
 
-export async function fetchGuardianReputation(
+export async function fetchMyTerritoryProfile(
   token: string
-): Promise<TerritoryGuardianReputationListResponse> {
-  const response = await fetch(`${API_BASE_URL}/admin/territories/guardians/reputation`, {
+): Promise<UserTerritoryProfileResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/me/profile`, {
     headers: authHeaders(token)
   });
-  return parseJsonResponse<TerritoryGuardianReputationListResponse>(
+  return parseJsonResponse<UserTerritoryProfileResponse>(
     response,
-    "List guardian reputation request"
+    "Fetch territory profile request"
   );
 }
 
-export async function resumeGuardian(guardianId: string, token: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/admin/territories/guardians/${guardianId}/resume`, {
+export async function fetchMyTaskCenter(
+  token: string
+): Promise<TaskCenterResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/me/tasks`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<TaskCenterResponse>(response, "Fetch my task center");
+}
+
+export async function fetchTerritoryOpportunities(
+  territoryId: string
+): Promise<TerritoryOpportunityResponse> {
+  const response = await fetch(`${API_BASE_URL}/territories/${territoryId}/opportunities`);
+  return parseJsonResponse<TerritoryOpportunityResponse>(response, "Fetch territory opportunities");
+}
+
+export async function fetchBounties(
+  token: string,
+  options?: {
+    scope?: "all" | "nearby" | "mine";
+    offset?: number;
+    limit?: number;
+    longitude?: number;
+    latitude?: number;
+  }
+): Promise<BountyTaskListResponse> {
+  const scope = options?.scope ?? "all";
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit ?? 20;
+  const params = new URLSearchParams({
+    scope,
+    offset: String(offset),
+    limit: String(limit)
+  });
+  if (options?.longitude !== undefined && options?.latitude !== undefined) {
+    params.set("longitude", String(options.longitude));
+    params.set("latitude", String(options.latitude));
+  }
+  const response = await fetch(`${API_BASE_URL}/bounties?${params.toString()}`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<BountyTaskListResponse>(response, "List bounties request");
+}
+
+export async function claimBounty(taskId: string, token: string): Promise<BountyTaskResponse> {
+  const response = await fetch(`${API_BASE_URL}/bounties/${taskId}/claim`, {
     method: "POST",
     headers: authHeaders(token)
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Resume guardian request failed with ${response.status}. Response: ${text.slice(0, 120)}`);
+  return parseJsonResponse<BountyTaskResponse>(response, "Claim bounty request");
+}
+
+export async function submitBounty(
+  taskId: string,
+  token: string,
+  payload: {
+    submit_longitude: number;
+    submit_latitude: number;
+    details?: string | null;
+    photo: File;
   }
+): Promise<BountySubmitResponse> {
+  const form = new FormData();
+  form.set("submit_longitude", String(payload.submit_longitude));
+  form.set("submit_latitude", String(payload.submit_latitude));
+  if (payload.details !== undefined && payload.details !== null) {
+    form.set("details", payload.details);
+  }
+  form.set("photo", payload.photo);
+  const response = await fetch(`${API_BASE_URL}/bounties/${taskId}/submit`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: form
+  });
+  return parseJsonResponse<BountySubmitResponse>(response, "Submit bounty request");
+}
+
+export async function fetchMyBountySubmissions(
+  token: string,
+  offset = 0,
+  limit = 20
+): Promise<BountySubmissionListResponse> {
+  const response = await fetch(`${API_BASE_URL}/bounties/mine/submissions?offset=${offset}&limit=${limit}`, {
+    headers: authHeaders(token)
+  });
+  return parseJsonResponse<BountySubmissionListResponse>(response, "List my bounty submissions request");
+}
+
+export async function fetchAdminBountySubmissions(
+  token: string,
+  status: "pending" | "approved" | "rejected" | "all" = "pending",
+  offset = 0,
+  limit = 20
+): Promise<BountySubmissionListResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/admin/bounties/submissions?status=${status}&offset=${offset}&limit=${limit}`,
+    {
+      headers: authHeaders(token)
+    }
+  );
+  return parseJsonResponse<BountySubmissionListResponse>(
+    response,
+    "List admin bounty submissions request"
+  );
+}
+
+export async function reviewAdminBountySubmission(
+  submissionId: string,
+  token: string,
+  payload: { action: "approve" | "reject"; review_comment?: string | null }
+): Promise<BountySubmissionResponse> {
+  const response = await fetch(`${API_BASE_URL}/admin/bounties/submissions/${submissionId}/review`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<BountySubmissionResponse>(
+    response,
+    "Review admin bounty submission request"
+  );
 }
 
 export async function reviewPoiCorrection(
@@ -1285,4 +1481,422 @@ export async function fetchMyPassport(token: string): Promise<PassportResponse> 
     headers: authHeaders(token)
   });
   return parseJsonResponse<PassportResponse>(response, "Fetch my passport request");
+}
+
+// ==================== Block Editor API ====================
+
+export type BlockResponse = {
+  id: string;
+  itinerary_id: string;
+  parent_block_id: string | null;
+  sort_order: number;
+  day_index: number;
+  lane_key: string;
+  start_minute: number | null;
+  end_minute: number | null;
+  block_type: string;
+  title: string;
+  duration_minutes: number | null;
+  cost: number | null;
+  tips: string | null;
+  longitude: number | null;
+  latitude: number | null;
+  address: string | null;
+  photos: string[] | null;
+  type_data: Record<string, unknown> | null;
+  is_container: boolean;
+  source_template_id: string | null;
+  status: "draft" | "ready" | "running" | "done" | "blocked";
+  priority: "low" | "medium" | "high";
+  risk_level: "low" | "medium" | "high";
+  assignee_user_id: string | null;
+  tags: string[] | null;
+  ui_meta: Record<string, unknown> | null;
+  children: BlockResponse[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type BlockDependencyResponse = {
+  id: string;
+  itinerary_id: string;
+  from_block_id: string;
+  to_block_id: string;
+  edge_type: "hard" | "soft";
+  created_at: string;
+};
+
+export type BlockTreeResponse = {
+  items: BlockResponse[];
+};
+
+export type BoardLaneSummary = {
+  lane_key: string;
+  label: string;
+  block_count: number;
+  done_count: number;
+};
+
+export type BoardResponse = {
+  itinerary_id: string;
+  items: BlockResponse[];
+  dependencies: BlockDependencyResponse[];
+  lanes: BoardLaneSummary[];
+  summary: {
+    block_count: number;
+    dependency_count: number;
+    blocked_count: number;
+  };
+};
+
+export type BlockCreatePayload = {
+  parent_block_id?: string | null;
+  sort_order?: number;
+  day_index?: number;
+  lane_key?: string;
+  start_minute?: number | null;
+  end_minute?: number | null;
+  block_type: string;
+  title: string;
+  duration_minutes?: number | null;
+  cost?: number | null;
+  tips?: string | null;
+  longitude?: number | null;
+  latitude?: number | null;
+  address?: string | null;
+  photos?: string[] | null;
+  type_data?: Record<string, unknown> | null;
+  is_container?: boolean;
+  source_template_id?: string | null;
+  status?: "draft" | "ready" | "running" | "done" | "blocked";
+  priority?: "low" | "medium" | "high";
+  risk_level?: "low" | "medium" | "high";
+  assignee_user_id?: string | null;
+  tags?: string[] | null;
+  ui_meta?: Record<string, unknown> | null;
+};
+
+export type BlockUpdatePayload = Partial<BlockCreatePayload>;
+
+export type BlockLayoutUpdatePayload = {
+  day_index?: number;
+  lane_key?: string;
+  start_minute?: number | null;
+  end_minute?: number | null;
+  sort_order?: number;
+};
+
+export type BlockReorderPayload = {
+  parent_block_id: string | null;
+  day_index: number;
+  ordered_block_ids: string[];
+};
+
+export type BlockBatchUpdatePayload = {
+  itinerary_id: string;
+  block_ids: string[];
+  status?: "draft" | "ready" | "running" | "done" | "blocked";
+  priority?: "low" | "medium" | "high";
+  risk_level?: "low" | "medium" | "high";
+  assignee_user_id?: string | null;
+  tags?: string[] | null;
+};
+
+export type BlockBatchUpdateResponse = {
+  updated_count: number;
+};
+
+export type BoardAutoLayoutResponse = {
+  itinerary_id: string;
+  updated_count: number;
+};
+
+export async function fetchBlocks(
+  itineraryId: string,
+  token: string,
+  collabGrant?: string
+): Promise<BlockTreeResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/blocks`, {
+    headers: authHeaders(token, collabGrant),
+  });
+  return parseJsonResponse<BlockTreeResponse>(response, "Fetch blocks");
+}
+
+export async function fetchBoard(
+  itineraryId: string,
+  token: string,
+  collabGrant?: string
+): Promise<BoardResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/board`, {
+    headers: authHeaders(token, collabGrant),
+  });
+  return parseJsonResponse<BoardResponse>(response, "Fetch board");
+}
+
+export async function createBlock(
+  itineraryId: string,
+  payload: BlockCreatePayload,
+  token: string,
+  collabGrant?: string,
+): Promise<BlockResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/blocks`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<BlockResponse>(response, "Create block");
+}
+
+export async function updateBlock(
+  blockId: string,
+  payload: BlockUpdatePayload,
+  token: string,
+  collabGrant?: string,
+): Promise<BlockResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/blocks/${blockId}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<BlockResponse>(response, "Update block");
+}
+
+export async function updateBlockLayout(
+  blockId: string,
+  payload: BlockLayoutUpdatePayload,
+  token: string,
+  collabGrant?: string
+): Promise<BlockResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/blocks/${blockId}/layout`, {
+    method: "PATCH",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<BlockResponse>(response, "Update block layout");
+}
+
+export async function batchUpdateBlocks(
+  payload: BlockBatchUpdatePayload,
+  token: string,
+  collabGrant?: string
+): Promise<BlockBatchUpdateResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/blocks/batch-update`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<BlockBatchUpdateResponse>(response, "Batch update blocks");
+}
+
+export async function createBlockDependency(
+  itineraryId: string,
+  blockId: string,
+  payload: { to_block_id: string; edge_type?: "hard" | "soft" },
+  token: string,
+  collabGrant?: string
+): Promise<BlockDependencyResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/blocks/${blockId}/dependencies`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<BlockDependencyResponse>(response, "Create block dependency");
+}
+
+export async function deleteBlockDependency(
+  itineraryId: string,
+  blockId: string,
+  edgeId: string,
+  token: string,
+  collabGrant?: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/itineraries/${itineraryId}/blocks/${blockId}/dependencies/${edgeId}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(token, collabGrant),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Delete block dependency failed with ${response.status}. ${text.slice(0, 120)}`);
+  }
+}
+
+export async function deleteBlock(blockId: string, token: string, collabGrant?: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/blocks/${blockId}`, {
+    method: "DELETE",
+    headers: authHeaders(token, collabGrant),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Delete block failed with ${response.status}. ${text.slice(0, 120)}`);
+  }
+}
+
+export async function reorderBlocks(
+  itineraryId: string,
+  payload: BlockReorderPayload,
+  token: string,
+  collabGrant?: string,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/blocks/reorder`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Reorder blocks failed with ${response.status}. ${text.slice(0, 120)}`);
+  }
+}
+
+export async function migrateLegacyItems(
+  itineraryId: string,
+  token: string,
+  collabGrant?: string
+): Promise<BlockTreeResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/blocks/migrate-legacy`, {
+    method: "POST",
+    headers: authHeaders(token, collabGrant),
+  });
+  return parseJsonResponse<BlockTreeResponse>(response, "Migrate legacy items");
+}
+
+export async function autoLayoutBoard(
+  itineraryId: string,
+  token: string,
+  collabGrant?: string
+): Promise<BoardAutoLayoutResponse> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/${itineraryId}/board/auto-layout`, {
+    method: "POST",
+    headers: authHeaders(token, collabGrant),
+  });
+  return parseJsonResponse<BoardAutoLayoutResponse>(response, "Auto layout board");
+}
+
+export async function ungroupBlock(blockId: string, token: string, collabGrant?: string): Promise<BlockResponse[]> {
+  const response = await fetch(`${API_BASE_URL}/itineraries/blocks/${blockId}/ungroup`, {
+    method: "POST",
+    headers: authHeaders(token, collabGrant),
+  });
+  return parseJsonResponse<BlockResponse[]>(response, "Ungroup block");
+}
+
+// ==================== Template API ====================
+
+export type TemplateApiResponse = {
+  id: string;
+  author_id: string;
+  author_nickname: string | null;
+  title: string;
+  description: string | null;
+  style_tags: string[] | null;
+  block_type: string;
+  is_group: boolean;
+  content_snapshot: Record<string, unknown> | null;
+  children_snapshot: Record<string, unknown>[] | null;
+  fork_count: number;
+  rating_avg: number | null;
+  rating_count: number;
+  status: string;
+  region_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TemplateListApiResponse = {
+  items: TemplateApiResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type TemplatePublishPayload = {
+  title: string;
+  description?: string | null;
+  style_tags?: string[] | null;
+  block_type: string;
+  is_group?: boolean;
+  content_snapshot?: Record<string, unknown> | null;
+  children_snapshot?: Record<string, unknown>[] | null;
+  longitude?: number | null;
+  latitude?: number | null;
+  region_name?: string | null;
+};
+
+export type TemplateForkPayload = {
+  itinerary_id: string;
+  day_index?: number;
+  sort_order?: number;
+  lane_key?: string;
+  parent_block_id?: string | null;
+};
+
+export type TemplateRatePayload = {
+  score: number;
+  comment?: string | null;
+};
+
+export async function fetchTemplates(params: {
+  block_type?: string;
+  style_tag?: string;
+  region_name?: string;
+  search?: string;
+  sort_by?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<TemplateListApiResponse> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null) qs.set(k, String(v));
+  }
+  const response = await fetch(`${API_BASE_URL}/templates?${qs.toString()}`);
+  return parseJsonResponse<TemplateListApiResponse>(response, "Fetch templates");
+}
+
+export async function fetchTemplateById(templateId: string): Promise<TemplateApiResponse> {
+  const response = await fetch(`${API_BASE_URL}/templates/${templateId}`);
+  return parseJsonResponse<TemplateApiResponse>(response, "Fetch template");
+}
+
+export async function publishTemplate(
+  payload: TemplatePublishPayload,
+  token: string,
+  collabGrant?: string,
+): Promise<TemplateApiResponse> {
+  const response = await fetch(`${API_BASE_URL}/templates`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<TemplateApiResponse>(response, "Publish template");
+}
+
+export async function forkTemplate(
+  templateId: string,
+  payload: TemplateForkPayload,
+  token: string,
+  collabGrant?: string,
+): Promise<{ created_blocks: BlockResponse[] }> {
+  const response = await fetch(`${API_BASE_URL}/templates/${templateId}/fork`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<{ created_blocks: BlockResponse[] }>(response, "Fork template");
+}
+
+export async function rateTemplate(
+  templateId: string,
+  payload: TemplateRatePayload,
+  token: string,
+  collabGrant?: string,
+): Promise<TemplateApiResponse> {
+  const response = await fetch(`${API_BASE_URL}/templates/${templateId}/rate`, {
+    method: "POST",
+    headers: { ...authHeaders(token, collabGrant), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<TemplateApiResponse>(response, "Rate template");
 }

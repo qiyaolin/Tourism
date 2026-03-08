@@ -9,31 +9,68 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.bounty import BountyTask
 from app.models.poi import Poi
 from app.models.poi_correction import PoiCorrection
 from app.models.territory import (
     TerritoryGuardian,
     TerritoryGuardianActivityLog,
     TerritoryGuardianApplication,
-    TerritoryGuardianReputationSnapshot,
     TerritoryRegion,
 )
 from app.models.user import User
 from app.schemas.territory import (
+    TaskCenterItem,
+    TaskCenterResponse,
     TerritoryGuardianApplicationCreatePayload,
     TerritoryGuardianApplicationListResponse,
     TerritoryGuardianApplicationResponse,
     TerritoryGuardianBrief,
     TerritoryGuardianCheckInResponse,
-    TerritoryGuardianReputationItem,
-    TerritoryGuardianReputationListResponse,
-    TerritoryGuardianResumeResponse,
+    TerritoryOpportunityResponse,
     TerritoryRebuildResponse,
     TerritoryRegionItem,
     TerritoryRegionListResponse,
+    UserTerritoryProfileResponse,
+    UserTerritoryRoleItem,
 )
 
 settings = get_settings()
+
+# ---------------------------------------------------------------------------
+# Role hierarchy (lowest 鈫?highest)
+# ---------------------------------------------------------------------------
+
+ROLE_HIERARCHY = ["regular", "local_expert", "area_guide", "city_ambassador"]
+
+ROLE_LABELS = {
+    "regular": "甯稿",
+    "local_expert": "鍦ㄥ湴杈句汉",
+    "area_guide": "鍖哄煙鍚戝",
+    "city_ambassador": "鍩庡競澶т娇",
+}
+
+
+def _next_role(current: str) -> str | None:
+    try:
+        idx = ROLE_HIERARCHY.index(current)
+    except ValueError:
+        return None
+    if idx + 1 < len(ROLE_HIERARCHY):
+        return ROLE_HIERARCHY[idx + 1]
+    return None
+
+
+def _role_index(role: str) -> int:
+    try:
+        return ROLE_HIERARCHY.index(role)
+    except ValueError:
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Geometry helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 
 def _parse_point_text(raw: str) -> tuple[float, float]:
@@ -68,6 +105,11 @@ def _cell_for_point(longitude: float, latitude: float, grid_size: float) -> tupl
     return int(math.floor(longitude / grid_size)), int(math.floor(latitude / grid_size))
 
 
+# ---------------------------------------------------------------------------
+# Guardian helpers
+# ---------------------------------------------------------------------------
+
+
 def _guardian_rows_to_map(
     db: Session,
     territory_ids: Iterable[UUID],
@@ -87,11 +129,17 @@ def _guardian_rows_to_map(
             TerritoryGuardianBrief(
                 user_id=guardian.user_id,
                 nickname=nickname,
+                role=guardian.role,
                 state=guardian.state,
                 granted_at=guardian.granted_at,
             )
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Territory region CRUD
+# ---------------------------------------------------------------------------
 
 
 def rebuild_territory_regions(db: Session) -> TerritoryRebuildResponse:
@@ -172,7 +220,20 @@ def rebuild_territory_regions(db: Session) -> TerritoryRebuildResponse:
     )
 
 
+def _bootstrap_territories_if_needed(db: Session) -> None:
+    active_count = db.scalar(
+        select(func.count()).select_from(TerritoryRegion).where(TerritoryRegion.status == "active")
+    ) or 0
+    if active_count > 0:
+        return
+    poi_count = db.scalar(select(func.count()).select_from(Poi)) or 0
+    if poi_count < settings.territory_min_pois:
+        return
+    rebuild_territory_regions(db)
+
+
 def list_territories(db: Session) -> TerritoryRegionListResponse:
+    _bootstrap_territories_if_needed(db)
     evaluate_guardian_governance(db)
     rows = db.execute(
         select(TerritoryRegion, func.ST_AsText(TerritoryRegion.boundary_geom), func.ST_AsText(TerritoryRegion.centroid_geom))
@@ -181,6 +242,31 @@ def list_territories(db: Session) -> TerritoryRegionListResponse:
     ).all()
     territory_ids = [region.id for region, _, _ in rows]
     guardian_map = _guardian_rows_to_map(db, territory_ids)
+
+    # Fetch sample POIs
+    ranked_pois_subq = (
+        select(
+            Poi.territory_id,
+            Poi.name,
+            func.row_number().over(
+                partition_by=Poi.territory_id,
+                order_by=Poi.updated_at.desc()
+            ).label('rn')
+        )
+        .where(Poi.territory_id.in_(territory_ids))
+        .subquery()
+    )
+    
+    sample_pois_query = db.execute(
+        select(ranked_pois_subq.c.territory_id, ranked_pois_subq.c.name)
+        .where(ranked_pois_subq.c.rn <= 3)
+    ).all()
+    
+    samples_by_region: dict[UUID, list[str]] = {rid: [] for rid in territory_ids}
+    for territory_id, name in sample_pois_query:
+        if territory_id:
+            samples_by_region[territory_id].append(name)
+
     items = [
         TerritoryRegionItem(
             id=region.id,
@@ -191,6 +277,7 @@ def list_territories(db: Session) -> TerritoryRegionListResponse:
             boundary_wkt=boundary_wkt or "",
             centroid_wkt=centroid_wkt or "",
             guardians=guardian_map.get(region.id, []),
+            sample_pois=samples_by_region.get(region.id, [])
         )
         for region, boundary_wkt, centroid_wkt in rows
     ]
@@ -208,6 +295,14 @@ def get_territory(db: Session, territory_id: UUID) -> TerritoryRegionItem:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Territory not found")
     region, boundary_wkt, centroid_wkt = row
     guardian_map = _guardian_rows_to_map(db, [region.id])
+    
+    sample_pois = db.scalars(
+        select(Poi.name)
+        .where(Poi.territory_id == territory_id)
+        .order_by(Poi.updated_at.desc())
+        .limit(3)
+    ).all()
+
     return TerritoryRegionItem(
         id=region.id,
         code=region.code,
@@ -217,7 +312,13 @@ def get_territory(db: Session, territory_id: UUID) -> TerritoryRegionItem:
         boundary_wkt=boundary_wkt or "",
         centroid_wkt=centroid_wkt or "",
         guardians=guardian_map.get(region.id, []),
+        sample_pois=list(sample_pois)
     )
+
+
+# ---------------------------------------------------------------------------
+# Legacy: guardian applications (kept for backward compat)
+# ---------------------------------------------------------------------------
 
 
 def submit_guardian_application(
@@ -370,6 +471,7 @@ def review_guardian_application(
             guardian = TerritoryGuardian(
                 territory_id=row.territory_id,
                 user_id=row.applicant_user_id,
+                role="regular",
                 state="active",
                 granted_by_user_id=current_user.id,
             )
@@ -393,6 +495,11 @@ def review_guardian_application(
     )
 
 
+# ---------------------------------------------------------------------------
+# Guardian territory membership helpers
+# ---------------------------------------------------------------------------
+
+
 def active_guardian_territory_ids(db: Session, user_id: UUID) -> list[UUID]:
     return list(
         db.scalars(
@@ -410,7 +517,36 @@ def can_review_correction_in_territory(db: Session, user: User, territory_id: UU
         return True
     if territory_id is None:
         return True
-    return territory_id in set(active_guardian_territory_ids(db, user.id))
+    # Only area_guide and city_ambassador can review corrections
+    guardian = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user.id,
+            TerritoryGuardian.territory_id == territory_id,
+            TerritoryGuardian.state == "active",
+            TerritoryGuardian.revoked_at.is_(None),
+            TerritoryGuardian.role.in_(("area_guide", "city_ambassador")),
+        )
+    ).first()
+    return guardian is not None
+
+
+def user_role_in_territory(db: Session, user_id: UUID, territory_id: UUID | None) -> str | None:
+    """Return the user's role in the given territory, or None if not a guardian."""
+    if territory_id is None:
+        return None
+    guardian = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.territory_id == territory_id,
+            TerritoryGuardian.revoked_at.is_(None),
+        )
+    ).first()
+    return guardian.role if guardian else None
+
+
+# ---------------------------------------------------------------------------
+# Activity logging
+# ---------------------------------------------------------------------------
 
 
 def log_guardian_review_activity(
@@ -428,6 +564,7 @@ def log_guardian_review_activity(
             payload=None,
         )
     )
+    _touch_guardian_active(db, guardian_user_id, territory_id)
 
 
 def guardian_check_in(
@@ -440,7 +577,6 @@ def guardian_check_in(
             TerritoryGuardian.territory_id == territory_id,
             TerritoryGuardian.user_id == current_user.id,
             TerritoryGuardian.revoked_at.is_(None),
-            TerritoryGuardian.state.in_(("active", "honorary")),
         )
     ).first()
     if guardian is None:
@@ -455,6 +591,7 @@ def guardian_check_in(
             created_at=now,
         )
     )
+    _touch_guardian_active(db, current_user.id, territory_id)
     db.commit()
     return TerritoryGuardianCheckInResponse(
         territory_id=territory_id,
@@ -463,142 +600,485 @@ def guardian_check_in(
     )
 
 
-def evaluate_guardian_governance(db: Session) -> None:
+def _touch_guardian_active(db: Session, user_id: UUID, territory_id: UUID) -> None:
+    """Update last_active_at and restore dormant guardians to active."""
+    guardian = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.territory_id == territory_id,
+            TerritoryGuardian.revoked_at.is_(None),
+        )
+    ).first()
+    if guardian is None:
+        return
     now = datetime.now(UTC)
-    activity_cutoff = now - timedelta(days=settings.guardian_active_window_days)
-    review_window_size = settings.guardian_reputation_window
-    review_threshold = settings.guardian_reputation_threshold
+    guardian.last_active_at = now
+    # Auto-recover from dormancy when user becomes active again
+    if guardian.state == "dormant":
+        guardian.state = "active"
+    db.add(guardian)
+
+
+# ---------------------------------------------------------------------------
+# Role evaluation & auto-promotion (core of the optimisation)
+# ---------------------------------------------------------------------------
+
+
+def _compute_target_role(
+    contribution_count: int,
+    thanks_received: int,
+    account_age_days: int,
+    area_count: int,
+) -> str:
+    """
+    Compute the target role based on contribution metrics.
+    Roles never demote 鈥?we always return the highest eligible role.
+    """
+    if (
+        area_count >= settings.role_ambassador_min_areas
+        and thanks_received >= settings.role_guide_min_thanks
+        and contribution_count >= settings.role_expert_min_contributions
+        and account_age_days >= settings.role_expert_min_age_days
+    ):
+        return "city_ambassador"
+    if (
+        thanks_received >= settings.role_guide_min_thanks
+        and contribution_count >= settings.role_expert_min_contributions
+        and account_age_days >= settings.role_expert_min_age_days
+    ):
+        return "area_guide"
+    if (
+        contribution_count >= settings.role_expert_min_contributions
+        and account_age_days >= settings.role_expert_min_age_days
+    ):
+        return "local_expert"
+    if contribution_count >= settings.role_regular_min_contributions:
+        return "regular"
+    return "regular"  # base role once guardian record exists
+
+
+def evaluate_user_territory_role(
+    db: Session,
+    user_id: UUID,
+    territory_id: UUID,
+) -> TerritoryGuardian:
+    """
+    Evaluate and potentially promote a user's role in a territory.
+    Creates the guardian record if it doesn't exist yet.
+    Roles never demote.
+    """
+    guardian = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.territory_id == territory_id,
+            TerritoryGuardian.revoked_at.is_(None),
+        )
+    ).first()
+
+    if guardian is None:
+        guardian = TerritoryGuardian(
+            territory_id=territory_id,
+            user_id=user_id,
+            role="regular",
+            state="active",
+            contribution_count=0,
+            thanks_received=0,
+            last_active_at=datetime.now(UTC),
+        )
+        db.add(guardian)
+        db.flush()
+
+    # Calculate account age
+    user = db.get(User, user_id)
+    account_age_days = 0
+    if user and user.created_at:
+        account_age_days = (datetime.now(UTC) - user.created_at.replace(tzinfo=UTC if user.created_at.tzinfo is None else user.created_at.tzinfo)).days
+
+    # Count distinct territories where user is a guardian
+    area_count = db.scalar(
+        select(func.count(func.distinct(TerritoryGuardian.territory_id))).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.revoked_at.is_(None),
+            TerritoryGuardian.role.in_(("area_guide", "city_ambassador")),
+        )
+    ) or 0
+
+    target_role = _compute_target_role(
+        contribution_count=guardian.contribution_count,
+        thanks_received=guardian.thanks_received,
+        account_age_days=account_age_days,
+        area_count=area_count,
+    )
+
+    # Never demote: only promote if target is higher
+    if _role_index(target_role) > _role_index(guardian.role):
+        guardian.role = target_role
+        db.add(guardian)
+
+    return guardian
+
+
+def record_territory_contribution(
+    db: Session,
+    user_id: UUID,
+    territory_id: UUID,
+    action_type: str,
+    related_correction_id: UUID | None = None,
+) -> TerritoryGuardian:
+    """
+    Record a contribution, increment counters, and evaluate role promotion.
+    This is the main entry point for the unified contribution system.
+    """
+    # Ensure guardian record exists
+    guardian = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.territory_id == territory_id,
+            TerritoryGuardian.revoked_at.is_(None),
+        )
+    ).first()
+
+    now = datetime.now(UTC)
+    if guardian is None:
+        guardian = TerritoryGuardian(
+            territory_id=territory_id,
+            user_id=user_id,
+            role="regular",
+            state="active",
+            contribution_count=0,
+            thanks_received=0,
+            last_active_at=now,
+        )
+        db.add(guardian)
+        db.flush()
+
+    # Log the activity
+    db.add(
+        TerritoryGuardianActivityLog(
+            territory_id=territory_id,
+            guardian_user_id=user_id,
+            action_type=action_type,
+            related_correction_id=related_correction_id,
+            payload=None,
+            created_at=now,
+        )
+    )
+
+    # Update counters
+    guardian.contribution_count += 1
+    guardian.last_active_at = now
+    if guardian.state == "dormant":
+        guardian.state = "active"
+    db.add(guardian)
+
+    # Evaluate role promotion
+    return evaluate_user_territory_role(db, user_id, territory_id)
+
+
+# ---------------------------------------------------------------------------
+# Governance: natural decay (replaces punitive system)
+# ---------------------------------------------------------------------------
+
+
+def evaluate_guardian_governance(db: Session) -> None:
+    """
+    Evaluate all guardians and apply natural decay.
+    - 90-day sliding window: guardians inactive beyond window become 'dormant'
+    - Dormant guardians keep their role 鈥?state simply turns grey
+    - Active guardians who were dormant auto-recover via _touch_guardian_active
+    """
+    now = datetime.now(UTC)
+    dormant_cutoff = now - timedelta(days=settings.guardian_dormant_window_days)
 
     guardians = db.scalars(
         select(TerritoryGuardian).where(TerritoryGuardian.revoked_at.is_(None))
     ).all()
     for guardian in guardians:
-        review_statuses = list(
-            db.scalars(
-                select(PoiCorrection.status)
-                .join(Poi, Poi.id == PoiCorrection.poi_id)
-                .where(
-                    PoiCorrection.reviewer_user_id == guardian.user_id,
-                    PoiCorrection.reviewed_at.is_not(None),
-                    Poi.territory_id == guardian.territory_id,
-                )
-                .order_by(PoiCorrection.reviewed_at.desc())
-                .limit(review_window_size)
-            ).all()
-        )
-        reviewed_count = len(review_statuses)
-        accepted_count = sum(1 for item in review_statuses if item == "accepted")
-        accuracy = float(accepted_count / reviewed_count) if reviewed_count > 0 else 1.0
-        snapshot_status = (
-            "suspended"
-            if reviewed_count >= review_window_size and accuracy < review_threshold
-            else "ok"
-        )
-        snapshot = db.scalars(
-            select(TerritoryGuardianReputationSnapshot).where(
-                TerritoryGuardianReputationSnapshot.territory_id == guardian.territory_id,
-                TerritoryGuardianReputationSnapshot.guardian_user_id == guardian.user_id,
-            )
-        ).first()
-        if snapshot is None:
-            snapshot = TerritoryGuardianReputationSnapshot(
-                territory_id=guardian.territory_id,
-                guardian_user_id=guardian.user_id,
-                window_size=review_window_size,
-                reviewed_count=reviewed_count,
-                accepted_count=accepted_count,
-                accuracy=accuracy,
-                status=snapshot_status,
-                calculated_at=now,
-            )
-        else:
-            snapshot.window_size = review_window_size
-            snapshot.reviewed_count = reviewed_count
-            snapshot.accepted_count = accepted_count
-            snapshot.accuracy = accuracy
-            snapshot.status = snapshot_status
-            snapshot.calculated_at = now
-        db.add(snapshot)
-
-        if snapshot_status == "suspended" and guardian.state != "suspended":
-            guardian.state = "suspended"
-            db.add(guardian)
-
-        if guardian.state in {"active", "honorary"}:
-            last_activity = db.scalar(
-                select(func.max(TerritoryGuardianActivityLog.created_at)).where(
-                    TerritoryGuardianActivityLog.guardian_user_id == guardian.user_id,
-                    TerritoryGuardianActivityLog.territory_id == guardian.territory_id,
-                    TerritoryGuardianActivityLog.action_type.in_(("check_in", "review")),
-                )
-            )
-            if last_activity is None or last_activity < activity_cutoff:
-                if guardian.state == "active":
-                    guardian.state = "honorary"
-                    db.add(guardian)
-            elif guardian.state == "honorary":
-                guardian.state = "active"
+        effective_last_active = guardian.last_active_at or guardian.granted_at
+        if effective_last_active < dormant_cutoff:
+            if guardian.state == "active":
+                guardian.state = "dormant"
                 db.add(guardian)
+        elif guardian.state == "dormant":
+            # Auto-recover if last_active_at is within window
+            guardian.state = "active"
+            db.add(guardian)
     db.commit()
 
 
-def list_guardian_reputation(db: Session) -> TerritoryGuardianReputationListResponse:
-    evaluate_guardian_governance(db)
-    rows = db.execute(
-        select(
-            TerritoryGuardianReputationSnapshot,
-            TerritoryGuardian,
-            TerritoryRegion.name,
-            User.nickname,
+# ---------------------------------------------------------------------------
+# User profile & task center (new endpoints)
+# ---------------------------------------------------------------------------
+
+
+def _compute_next_role_progress(guardian: TerritoryGuardian, account_age_days: int) -> float:
+    """Compute progress toward the next role as a float 0.0 ~ 1.0."""
+    nr = _next_role(guardian.role)
+    if nr is None:
+        return 1.0
+
+    if nr == "local_expert":
+        contrib_progress = min(guardian.contribution_count / max(settings.role_expert_min_contributions, 1), 1.0)
+        age_progress = min(account_age_days / max(settings.role_expert_min_age_days, 1), 1.0)
+        return (contrib_progress + age_progress) / 2.0
+    elif nr == "area_guide":
+        return min(guardian.thanks_received / max(settings.role_guide_min_thanks, 1), 1.0)
+    elif nr == "city_ambassador":
+        return 0.0  # Needs multi-area coverage, computed at higher level
+    return 0.0
+
+
+def get_user_territory_profile(db: Session, user_id: UUID) -> UserTerritoryProfileResponse:
+    """Return the user's territory roles, contribution stats, and promotion progress."""
+    guardians = db.scalars(
+        select(TerritoryGuardian).where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.revoked_at.is_(None),
+        ).order_by(TerritoryGuardian.contribution_count.desc())
+    ).all()
+
+    territory_ids = [g.territory_id for g in guardians]
+    territory_map: dict[UUID, str] = {}
+    if territory_ids:
+        for t in db.scalars(select(TerritoryRegion).where(TerritoryRegion.id.in_(territory_ids))).all():
+            territory_map[t.id] = t.name
+
+    user = db.get(User, user_id)
+    account_age_days = 0
+    if user and user.created_at:
+        account_age_days = (datetime.now(UTC) - user.created_at.replace(tzinfo=UTC if user.created_at.tzinfo is None else user.created_at.tzinfo)).days
+
+    roles = []
+    total_contributions = 0
+    total_thanks = 0
+    for g in guardians:
+        total_contributions += g.contribution_count
+        total_thanks += g.thanks_received
+        nr = _next_role(g.role)
+        progress = _compute_next_role_progress(g, account_age_days)
+        roles.append(
+            UserTerritoryRoleItem(
+                territory_id=g.territory_id,
+                territory_name=territory_map.get(g.territory_id, ""),
+                role=g.role,
+                state=g.state,
+                contribution_count=g.contribution_count,
+                thanks_received=g.thanks_received,
+                next_role=nr,
+                next_role_progress=round(progress, 2),
+            )
         )
-        .join(
-            TerritoryGuardian,
-            (TerritoryGuardian.territory_id == TerritoryGuardianReputationSnapshot.territory_id)
-            & (TerritoryGuardian.user_id == TerritoryGuardianReputationSnapshot.guardian_user_id),
-        )
-        .join(TerritoryRegion, TerritoryRegion.id == TerritoryGuardianReputationSnapshot.territory_id)
-        .join(User, User.id == TerritoryGuardianReputationSnapshot.guardian_user_id)
-        .order_by(
-            TerritoryGuardianReputationSnapshot.status.desc(),
-            TerritoryGuardianReputationSnapshot.accuracy.asc(),
-            TerritoryGuardianReputationSnapshot.calculated_at.desc(),
+
+    return UserTerritoryProfileResponse(
+        user_id=user_id,
+        roles=roles,
+        total_contributions=total_contributions,
+        total_thanks=total_thanks,
+    )
+
+
+def get_task_center(db: Session, user_id: UUID) -> TaskCenterResponse:
+    """Return aggregated tasks for the user's guardian territories."""
+    guardian_territories = db.execute(
+        select(TerritoryGuardian.territory_id, TerritoryGuardian.role, TerritoryRegion.name)
+        .join(TerritoryRegion, TerritoryRegion.id == TerritoryGuardian.territory_id)
+        .where(
+            TerritoryGuardian.user_id == user_id,
+            TerritoryGuardian.revoked_at.is_(None),
+            TerritoryGuardian.state == "active",
         )
     ).all()
-    items = [
-        TerritoryGuardianReputationItem(
-            guardian_id=guardian.id,
-            territory_id=snapshot.territory_id,
-            territory_name=territory_name,
-            guardian_user_id=snapshot.guardian_user_id,
-            guardian_nickname=nickname,
-            guardian_state=guardian.state,
-            reviewed_count=snapshot.reviewed_count,
-            accepted_count=snapshot.accepted_count,
-            accuracy=snapshot.accuracy,
-            threshold=settings.guardian_reputation_threshold,
-            status=snapshot.status,
-            calculated_at=snapshot.calculated_at,
+
+    if not guardian_territories:
+        return TaskCenterResponse(
+            pending_reviews=0,
+            items=[],
+            monthly_contributions=0,
+            monthly_helped_count=0,
         )
-        for snapshot, guardian, territory_name, nickname in rows
-    ]
-    return TerritoryGuardianReputationListResponse(items=items)
 
+    territory_ids = [t_id for t_id, _, _ in guardian_territories]
+    territory_name_map = {t_id: name for t_id, _, name in guardian_territories}
+    guide_territory_ids = [t_id for t_id, role, _ in guardian_territories if role in ("area_guide", "city_ambassador")]
 
-def resume_guardian(
-    db: Session,
-    guardian_id: UUID,
-) -> TerritoryGuardianResumeResponse:
-    guardian = db.get(TerritoryGuardian, guardian_id)
-    if guardian is None or guardian.revoked_at is not None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guardian not found")
-    guardian.state = "active"
-    guardian.updated_at = datetime.now(UTC)
-    db.add(guardian)
-    db.commit()
-    db.refresh(guardian)
-    return TerritoryGuardianResumeResponse(
-        guardian_id=guardian.id,
-        territory_id=guardian.territory_id,
-        state=guardian.state,
-        updated_at=guardian.updated_at,
+    items: list[TaskCenterItem] = []
+
+    # 1. Pending corrections to review (only for area_guide+)
+    if guide_territory_ids:
+        pending_rows = db.execute(
+            select(PoiCorrection.id, PoiCorrection.created_at, Poi.name, Poi.territory_id)
+            .join(Poi, Poi.id == PoiCorrection.poi_id)
+            .where(
+                PoiCorrection.status == "pending",
+                Poi.territory_id.in_(guide_territory_ids),
+            )
+            .order_by(PoiCorrection.created_at.asc())
+            .limit(20)
+        ).all()
+        for corr_id, created_at, poi_name, t_id in pending_rows:
+            items.append(
+                TaskCenterItem(
+                    task_type="pending_review",
+                    title=f"审核纠错：{poi_name}",
+                    territory_name=territory_name_map.get(t_id, ""),
+                    territory_id=t_id,
+                    target_id=corr_id,
+                    points=10,
+                    created_at=created_at,
+                )
+            )
+
+    # 2. POIs needing verification (any guardian)
+    stale_cutoff = datetime.now(UTC) - timedelta(days=45)
+    stale_pois = db.execute(
+        select(Poi.id, Poi.name, Poi.territory_id, Poi.updated_at)
+        .where(
+            Poi.territory_id.in_(territory_ids),
+            Poi.updated_at < stale_cutoff,
+        )
+        .order_by(Poi.updated_at.asc())
+        .limit(10)
+    ).all()
+    for poi_id, poi_name, t_id, updated_at in stale_pois:
+        items.append(
+            TaskCenterItem(
+                task_type="poi_verification",
+                title=f"验证信息：{poi_name}",
+                territory_name=territory_name_map.get(t_id, ""),
+                territory_id=t_id,
+                target_id=poi_id,
+                points=15,
+                created_at=updated_at,
+            )
+        )
+
+    # 3. Open bounty tasks in guardian territories
+    bounty_rows = db.execute(
+        select(BountyTask.id, BountyTask.generated_at, BountyTask.reward_points, Poi.name, BountyTask.territory_id)
+        .join(Poi, Poi.id == BountyTask.poi_id)
+        .where(BountyTask.territory_id.in_(territory_ids), BountyTask.status == "open")
+        .order_by(BountyTask.generated_at.desc())
+        .limit(10)
+    ).all()
+    for bounty_id, generated_at, reward_points, poi_name, territory_id in bounty_rows:
+        items.append(
+            TaskCenterItem(
+                task_type="bounty",
+                title=f"悬赏任务：{poi_name}",
+                territory_name=territory_name_map.get(territory_id, ""),
+                territory_id=territory_id,
+                target_id=bounty_id,
+                points=reward_points,
+                created_at=generated_at,
+            )
+        )
+
+    # Monthly stats
+    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    monthly_contributions = db.scalar(
+        select(func.count()).select_from(TerritoryGuardianActivityLog).where(
+            TerritoryGuardianActivityLog.guardian_user_id == user_id,
+            TerritoryGuardianActivityLog.created_at >= month_start,
+        )
+    ) or 0
+
+    # Approximate "helped count" 鈥?how many corrections were accepted in user's territories
+    monthly_helped = db.scalar(
+        select(func.count()).select_from(PoiCorrection)
+        .join(Poi, Poi.id == PoiCorrection.poi_id)
+        .where(
+            Poi.territory_id.in_(territory_ids),
+            PoiCorrection.status == "accepted",
+            PoiCorrection.reviewed_at >= month_start,
+        )
+    ) or 0
+
+    pending_reviews = sum(1 for item in items if item.task_type == "pending_review")
+
+    return TaskCenterResponse(
+        pending_reviews=pending_reviews,
+        items=items,
+        monthly_contributions=monthly_contributions,
+        monthly_helped_count=monthly_helped,
+    )
+
+def get_territory_opportunities(db: Session, territory_id: UUID) -> TerritoryOpportunityResponse:
+    region = db.get(TerritoryRegion, territory_id)
+    if not region:
+        raise HTTPException(status_code=404, detail="Territory not found")
+
+    items: list[TaskCenterItem] = []
+
+    pending_corrections = db.scalars(
+        select(PoiCorrection)
+        .join(Poi, Poi.id == PoiCorrection.poi_id)
+        .where(
+            PoiCorrection.status == "pending",
+            Poi.territory_id == territory_id,
+        )
+        .order_by(PoiCorrection.created_at.desc())
+        .limit(3)
+    ).all()
+
+    for correction in pending_corrections:
+        poi = db.get(Poi, correction.poi_id)
+        poi_name = poi.name if poi else "未知地点"
+        items.append(
+            TaskCenterItem(
+                task_type="pending_review",
+                title=f"审核纠错：{poi_name}",
+                territory_name=region.name,
+                territory_id=territory_id,
+                target_id=correction.id,
+                points=5,
+                created_at=correction.created_at,
+            )
+        )
+
+    pois_missing_info = db.scalars(
+        select(Poi)
+        .where(
+            Poi.territory_id == territory_id,
+            Poi.opening_hours.is_(None),
+        )
+        .order_by(Poi.created_at.desc())
+        .limit(4)
+    ).all()
+
+    for poi in pois_missing_info:
+        items.append(
+            TaskCenterItem(
+                task_type="nearby_opportunity",
+                title=f"补充营业时间：{poi.name}",
+                territory_name=region.name,
+                territory_id=territory_id,
+                target_id=poi.id,
+                points=10,
+                created_at=poi.created_at,
+            )
+        )
+
+    bounty_rows = db.execute(
+        select(BountyTask.id, BountyTask.generated_at, BountyTask.reward_points, Poi.name)
+        .join(Poi, Poi.id == BountyTask.poi_id)
+        .where(BountyTask.territory_id == territory_id, BountyTask.status == "open")
+        .order_by(BountyTask.generated_at.desc())
+        .limit(3)
+    ).all()
+    for bounty_id, generated_at, reward_points, poi_name in bounty_rows:
+        items.append(
+            TaskCenterItem(
+                task_type="bounty",
+                title=f"悬赏任务：{poi_name}",
+                territory_name=region.name,
+                territory_id=territory_id,
+                target_id=bounty_id,
+                points=reward_points,
+                created_at=generated_at,
+            )
+        )
+
+    return TerritoryOpportunityResponse(
+        territory_id=territory_id,
+        items=items,
     )

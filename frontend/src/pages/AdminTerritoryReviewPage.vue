@@ -3,23 +3,18 @@ import { onMounted, ref } from "vue";
 
 import {
   fetchAdminTerritoryApplications,
-  fetchGuardianReputation,
   rebuildTerritories,
-  resumeGuardian,
   reviewAdminTerritoryApplication,
   type TerritoryGuardianApplicationResponse,
-  type TerritoryGuardianReputationItemResponse
 } from "../api";
 import { useAuth } from "../composables/useAuth";
 
 const loading = ref(false);
 const rebuilding = ref(false);
 const reviewingId = ref("");
-const resumeId = ref("");
 const error = ref("");
 const success = ref("");
 const appItems = ref<TerritoryGuardianApplicationResponse[]>([]);
-const reputationItems = ref<TerritoryGuardianReputationItemResponse[]>([]);
 const commentById = ref<Record<string, string>>({});
 
 const { token, user, loadMe } = useAuth();
@@ -38,12 +33,8 @@ async function loadData() {
   loading.value = true;
   error.value = "";
   try {
-    const [apps, reputations] = await Promise.all([
-      fetchAdminTerritoryApplications(token.value, statusFilter.value, 0, 100),
-      fetchGuardianReputation(token.value)
-    ]);
+    const apps = await fetchAdminTerritoryApplications(token.value, statusFilter.value, 0, 100);
     appItems.value = apps.items;
-    reputationItems.value = reputations.items;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "加载管理员数据失败";
   } finally {
@@ -86,22 +77,6 @@ async function handleRebuild() {
   }
 }
 
-async function handleResume(guardianId: string) {
-  if (!token.value) return;
-  resumeId.value = guardianId;
-  error.value = "";
-  success.value = "";
-  try {
-    await resumeGuardian(guardianId, token.value);
-    success.value = "守护者审核权限已恢复。";
-    await loadData();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : "恢复权限失败";
-  } finally {
-    resumeId.value = "";
-  }
-}
-
 onMounted(async () => {
   await loadMe();
   await loadData();
@@ -113,7 +88,7 @@ onMounted(async () => {
     <header class="topbar">
       <div>
         <p class="kicker">Admin</p>
-        <h1>领地守护审核台</h1>
+        <h1>领地管理台</h1>
       </div>
       <div class="action-row">
         <button class="btn ghost" :disabled="loading" @click="loadData">刷新</button>
@@ -121,7 +96,7 @@ onMounted(async () => {
       </div>
     </header>
 
-    <p class="subtle">管理员负责守护者申请审核、区域重建与信誉异常恢复。</p>
+    <p class="subtle">管理员负责区域重建与守护者申请审核。角色晋升由系统根据贡献自动计算。</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="success" class="hint">{{ success }}</p>
     <p v-if="loading" class="subtle">加载中...</p>
@@ -152,24 +127,6 @@ onMounted(async () => {
         </div>
       </article>
       <p v-if="!loading && appItems.length === 0" class="subtle">当前筛选条件下无申请。</p>
-    </section>
-
-    <section class="territory-admin-section">
-      <h2>守护者信誉看板</h2>
-      <article v-for="item in reputationItems" :key="item.guardian_id" class="mine-card">
-        <h3>{{ item.territory_name }} · @{{ item.guardian_nickname }}</h3>
-        <p class="subtle">
-          状态：{{ item.guardian_state }} · 审核样本：{{ item.reviewed_count }} · 采纳率：
-          {{ Math.round(item.accuracy * 10000) / 100 }}%
-        </p>
-        <p class="subtle">阈值：{{ Math.round(item.threshold * 100) }}%</p>
-        <div v-if="item.guardian_state === 'suspended'" class="action-row">
-          <button class="btn primary" :disabled="resumeId === item.guardian_id" @click="handleResume(item.guardian_id)">
-            恢复审核权
-          </button>
-        </div>
-      </article>
-      <p v-if="!loading && reputationItems.length === 0" class="subtle">暂无守护者信誉数据。</p>
     </section>
   </main>
 </template>

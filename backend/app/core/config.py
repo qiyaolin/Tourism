@@ -39,9 +39,20 @@ class Settings(BaseSettings):
     territory_grid_size_deg: float = 0.15
     territory_min_pois: int = 3
     territory_region_name_prefix: str = "守护区域"
-    guardian_active_window_days: int = 30
-    guardian_reputation_window: int = 30
-    guardian_reputation_threshold: float = 0.7
+    guardian_dormant_window_days: int = 90
+    role_regular_min_contributions: int = 3
+    role_expert_min_contributions: int = 10
+    role_expert_min_age_days: int = 30
+    role_guide_min_thanks: int = 20
+    role_ambassador_min_areas: int = 3
+    bounty_stale_days: int = 45
+    bounty_gps_radius_meters: int = 500
+    bounty_default_reward_points: int = 20
+    bounty_high_freq_daily_limit: int = 5
+    bounty_nearby_radius_meters: int = 1500
+    bounty_new_user_cooldown_enabled: bool = False
+    bounty_new_user_cooldown_days: int = 7
+    bounty_new_user_daily_limit: int = 1
 
     model_config = SettingsConfigDict(
         env_file=".env",

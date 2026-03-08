@@ -17,8 +17,10 @@ const TEXT = {
   logout: "\u9000\u51fa",
   login: "\u767b\u5f55",
   passport: "数字护照",
+  bounties: "赏金任务",
   territories: "领地计划",
-  territoryAdmin: "守护审核"
+  territoryAdmin: "守护审核",
+  bountyAdmin: "赏金审核"
 } as const;
 
 const route = useRoute();
@@ -79,6 +81,7 @@ watch(
             <span v-if="unreadCount > 0" class="nav-badge">{{ unreadCount }}</span>
           </RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/passport') }]" to="/passport">{{ TEXT.passport }}</RouterLink>
+          <RouterLink :class="['site-link', { active: isActive('/bounties') }]" to="/bounties">{{ TEXT.bounties }}</RouterLink>
           <RouterLink :class="['site-link', { active: isActive('/territories') }]" to="/territories">{{ TEXT.territories }}</RouterLink>
           <RouterLink
             v-if="user?.role === 'admin'"
@@ -86,6 +89,13 @@ watch(
             to="/admin/territories/review"
           >
             {{ TEXT.territoryAdmin }}
+          </RouterLink>
+          <RouterLink
+            v-if="user?.role === 'admin'"
+            :class="['site-link', { active: isActive('/admin/bounties/review') }]"
+            to="/admin/bounties/review"
+          >
+            {{ TEXT.bountyAdmin }}
           </RouterLink>
         </nav>
         <div class="site-user">

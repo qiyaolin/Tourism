@@ -517,3 +517,219 @@
   - 变更：新增领地治理数据模型与迁移（`territory_regions`、`territory_guardian_applications`、`territory_guardians`、`territory_guardian_activity_logs`、`territory_guardian_reputation_snapshots`，并新增 `pois.territory_id`）；新增用户端与管理员端 API；前端新增“领地计划”页面与“守护审核”管理页；纠错审核链路接入“本区域守护优先 + 并发抢占保护 + 守护行为日志 + 区域字段回传”。
   - 结论：Phase 3.2 的 P0+P1 代码实现、自动化门禁、容器迁移与运行态基础联调均通过，当前状态为 `test_passed`。
   - 风险：尚未完成用户侧最终复测，且当前 lint 仍存在历史存量 warning（非本次新增）。
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-002 | Phase 3.2 | 棰嗗湴椤甸潰绌烘€佹牴鍥犱慨澶嶏紙鑷姩鍒濆鍖栧尯鍩燂級+ 绠＄悊鍛樿处鍙峰彲鐢ㄦ€т繚闅?| test_passed | codex | 2026-02-23T17:35:00-05:00 | `backend/app/services/territory_service.py`, `frontend/src/pages/TerritoryPage.vue`, `PROGRESS.md`, `DB:users(role update)` | `uv run --project backend ruff check --ignore E501 backend/app/services/territory_service.py`=passed锛沗uv run --project backend pytest -q backend/tests/test_territory_service.py`=4 passed锛沗pnpm --dir frontend build`=passed锛涜繍琛屾€佹牎楠岋細`GET /api/v1/territories`=200 涓旇嚜鍔ㄧ敓鎴?`territory_regions>0`锛堝綋鍓?锛夊苟鍒嗛厤 `pois.territory_id`锛堝綋鍓?4锛夛紱绠＄悊鍛橀壌鏉冩牎楠岋細绠＄悊鍛?token 璁块棶 `GET /api/v1/admin/territories/applications`=200 | 寰呯敤鎴锋渶缁堝娴?| 鐢ㄦ埛鍏抽棴鏃ф爣绛鹃〉鍚庨噸鏂版墦寮€ `/territories` 涓?`/admin/territories/review`锛岄獙璇佲€滃彲瑙侀鍦板崱鐗囥€佸彲鎻愪氦鐢宠銆佺鐞嗗憳鍙鏍糕€濋摼璺紱閫氳繃鍚庢帹杩?Phase 3.2 `done` |
+
+### Changelog Addendum
+
+- 2026-02-23T17:35:00-05:00
+  - 鍙樻洿锛氭柊澧為鍦拌嚜鍔ㄥ紩瀵奸€昏緫锛堝綋鏃?active 鍖哄煙涓?POI 杈鹃槇鍊兼椂锛岄娆″垪琛ㄨ姹傝嚜鍔ㄦ墽琛屽尯鍩熸瀯寤猴級锛屽苟鍦ㄥ墠绔鍦伴〉闈㈣ˉ鍏呯┖鎬佸紩瀵硷紱瀹屾垚绠＄悊鍛樿处鍙峰彲鐢ㄦ€ф牎楠屼笌瑙掕壊淇濋殰銆?  - 缁撹锛氳В鍐斥€滈〉闈㈠彧鏈夋枃瀛楁棤鍙搷浣滃姛鑳解€濈殑鏍瑰洜锛堝尯鍩熸湭鍒濆鍖栵級锛涚鐞嗗憳绔潈闄愰摼璺彲鐢ㄣ€?  - 椋庨櫓锛氱鐞嗗憳鐧诲綍楠岃瘉鐮佷负鍔ㄦ€佷竴娆℃€ч獙璇佺爜锛岄渶閫氳繃 `/auth/send-code` 瀹炴椂鑾峰彇銆?
+
+## Session Update (2026-02-23 Phase 3.2 Backend Restart Stability Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-003 | Phase 3.2 | 鍓嶅悗绔噸鍚墽琛屼笌鍚庣鍚姩澶辫触鏍瑰洜淇锛圓lembic 鍙?Head 鏀舵暃锛?| test_passed | codex | 2026-02-23T15:13:24.1046301-05:00 | `backend/alembic/versions/20260223_0016_territory_guardian_roles.py`, `PROGRESS.md` | `docker compose -f infra/docker-compose.yml restart backend frontend`=executed锛沗uv run alembic -c alembic.ini heads`=single head(`20260223_0016`)锛沗uv run alembic -c alembic.ini upgrade head`=passed锛沗docker compose -f infra/docker-compose.yml ps` 鏄剧ず backend/frontend 鍧?`Up`锛沗GET http://localhost:8000/api/v1/health/live`=200锛沗GET http://localhost:8000/api/v1/auth/me`=401(鏈櫥褰曢鏈?锛沗GET http://localhost:5173`=200 | 鏃?| 鐢ㄦ埛鍏抽棴鏃ф爣绛鹃〉鍚庨噸鏂版墦寮€椤甸潰锛岀户缁墽琛岄鍦拌鍒掗〉闈㈠姛鑳藉娴?|
+
+### Changelog Addendum
+
+- 2026-02-23T15:13:24.1046301-05:00
+  - 鍙樻洿锛氬畾浣嶅悗绔噸鍚惊鐜牴鍥犱负 Alembic 瀛樺湪鍙?head锛坄20260223_0015` 涓?`20260223_0016`锛夛紝淇 `20260223_0016` 鐨?`down_revision` 鎸囧悜 `20260223_0015`锛岃縼绉婚摼鎭㈠鍗曚富绾裤€?  - 缁撹锛氬墠鍚庣鍧囧凡瀹屾垚閲嶅惎骞舵仮澶嶅彲鐢紱鍚庣鍋ュ悍妫€鏌ヤ互 `GET /api/v1/health/live` 涓哄噯锛坄/health/live` 杩斿洖 404 灞炶矾寰勪笉鍖归厤锛夈€?  - 椋庨櫓锛氭湰娆′粎澶勭悊鏈嶅姟閲嶅惎绋冲畾鎬э紝棰嗗湴璁″垝椤甸潰淇℃伅鍙鎬у寮哄姛鑳戒粛寰呯户缁疄鐜颁笌鏈€缁堥獙鏀躲€?
+
+## Session Update (2026-02-23 Phase 3.2 Frontend Syntax Recovery)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-004 | Phase 3.2 | 棰嗗湴涓庢姢鐓ч〉闈㈡ā鏉挎崯鍧忎慨澶嶏紙缂哄け缁撴潫鏍囩 + 缁撴瀯閲嶅缓锛?| test_passed | codex | 2026-02-23T15:17:08.7375765-05:00 | `frontend/src/pages/PassportPage.vue`, `frontend/src/pages/TerritoryPage.vue`, `PROGRESS.md` | `pnpm --dir frontend build`=passed锛沗pnpm --dir frontend lint`=passed(0 error, warnings only)锛涚紪璇戦敊璇?`Element is missing end tag` 宸叉秷闄?| 鏃?| 鐢ㄦ埛鍏抽棴鏃ф爣绛鹃〉鍚庨噸鏂版墦寮€ `/passport` 涓?`/territories` 椤甸潰澶嶆祴鍔熻兘涓庢枃妗堝彲璇绘€?|
+
+### Changelog Addendum
+
+- 2026-02-23T15:17:08.7375765-05:00
+  - 鍙樻洿锛氫慨澶?`PassportPage.vue` 妯℃澘閲嶅鐗囨瀵艰嚧鐨勬爣绛炬湭闂悎锛沗TerritoryPage.vue` 瀛樺湪鑴氭湰/妯℃澘閿欎綅鍜岀紪鐮佹薄鏌擄紝宸叉墽琛屾暣椤甸噸寤哄苟淇濈暀璁ら銆佸畧鎶ょ姸鎬併€佷换鍔′腑蹇冦€佸贰妫€鎵撳崱涓婚摼璺€?  - 缁撹锛氬墠绔瀯寤烘仮澶嶉€氳繃锛屽綋鍓嶄笉鍐嶅嚭鐜?Vite 鐨勬ā鏉跨粨鏉熸爣绛鹃敊璇€?  - 椋庨櫓锛氶」鐩粛瀛樺湪鍘嗗彶鏍峰紡瑙勮寖绫?lint warnings锛堥潪鏈鏂板锛夛紝涓嶅奖鍝嶈繍琛屼絾闇€鍚庣画闆嗕腑娌荤悊銆?
+
+## Session Update (2026-02-24 Operations Restart Script)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| OPS-RESTART-001 | Governance | Frontend/backend restart script for local operations | done | codex | 2026-02-24T20:47:36.7902172-05:00 | `infra/scripts/restart-services.ps1`, `infra/scripts/restart-services.config.json`, `README.md`, `PROGRESS.md` | `powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1 -DryRun`=passed; `powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1`=passed; health check `http://localhost:8000/api/v1/health/live`=200, `http://localhost:5173`=200 | None | Use this script as the default restart entry; run with `-Rebuild` when image rebuild is required. |
+
+### Changelog Addendum
+
+- 2026-02-24T20:47:36.7902172-05:00
+  - Change: Added a configurable PowerShell restart script and JSON config to restart backend/frontend with optional rebuild and health checks.
+  - Conclusion: Restart flow is now one command and verified against running Docker services.
+  - Risk: Script execution still depends on local Docker daemon permissions.
+
+## Session Update (2026-02-24 Frontend Version Mismatch Diagnosis)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-005 | Phase 3.2 | Territory page old-version symptom diagnosis | blocked | codex | 2026-02-24T21:02:40.2321591-05:00 | `PROGRESS.md` | Local source marker: `frontend/src/pages/TerritoryPage.vue` contains `fetchTerritoryOpportunities`; container `/app/src/pages/TerritoryPage.vue` matches local; online artifact `http://localhost:5173/src/pages/TerritoryPage.vue` still returns `guardianCheckIn` and misses `fetchTerritoryOpportunities`; `docker compose logs frontend --tail 80` reports Vue compile errors (`Element is missing end tag`) for `TerritoryPage.vue` and `PassportPage.vue` | Frontend dev server cannot compile current page files, so runtime keeps serving stale cached module | Repair syntax/encoding corruption in `TerritoryPage.vue` + `PassportPage.vue`, restart frontend, then verify online artifact marker and ask user to close old tabs and reopen. |
+
+### Changelog Addendum
+
+- 2026-02-24T21:02:40.2321591-05:00
+  - Change: Completed three-way version consistency diagnosis (local/container/online) for Territory page mismatch.
+  - Conclusion: Root cause is current frontend compile failure, not deployment sync failure.
+  - Risk: Until syntax/encoding corruption is fixed, users will continue to hit stale module behavior.
+
+## Session Update (2026-02-25 Frontend Syntax/Encoding Recovery Verification)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-006 | Phase 3.2 | Territory/Passport syntax and encoding repair with version-consistency recheck | done | codex | 2026-02-25T11:53:48.0694354-05:00 | `frontend/src/pages/TerritoryPage.vue`, `frontend/src/pages/PassportPage.vue`, `PROGRESS.md` | `pnpm --dir frontend build`=passed; `powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1`=passed; local markers hit (`fetchTerritoryOpportunities`, `鐢宠璁ら`, `鍦ㄥ湴鍚戝缃戠粶`, `鍦ㄥ湴鍚戝瑙掕壊`, `绛捐瘉寰界珷澧檂, `杩戞湡璐＄尞璁板綍`); container markers hit in `/app/src/pages/TerritoryPage.vue` and `/app/src/pages/PassportPage.vue`; hash consistency passed (local vs container SHA256 equal for both files); online artifact markers hit in `http://localhost:5173/src/pages/TerritoryPage.vue` (`fetchTerritoryOpportunities`, `openApplyModal`, old marker `guardianCheckIn` missing) and `http://localhost:5173/src/pages/PassportPage.vue` (`fetchMyTerritoryProfile`, `section-title-guide`, `formatActionType`, `exportPassport`) | None | Ask user to close old browser tabs and reopen `/territories` and `/passport` for final runtime confirmation. |
+
+### Changelog Addendum
+
+- 2026-02-25T11:53:48.0694354-05:00
+  - Change: Rebuilt corrupted Territory and Passport page sources into UTF-8, compilable Vue SFCs and completed backend/frontend restart synchronization.
+  - Conclusion: Frontend no longer serves stale legacy module for Territory page; local/container/online artifacts are now consistent.
+  - Risk: Frontend still has a non-blocking warning about ignored `esbuild` build scripts in container startup logs.
+
+## Session Update (2026-02-25 Phase 3.2 Territory Plan Automation Verification)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-007 | Phase 3.2 | Territory plan automation test expansion (service + API wiring + regression fix) | test_passed | codex | 2026-02-25T12:17:13.5433303-05:00 | `backend/app/services/territory_service.py`, `backend/tests/test_territory_service_strict.py`, `backend/tests/test_territory_api_e2e.py`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/services/territory_service.py backend/tests/test_territory_service_strict.py backend/tests/test_territory_api_e2e.py`=passed; `uv run --project backend python -m py_compile backend/app/services/territory_service.py backend/tests/test_territory_service_strict.py backend/tests/test_territory_api_e2e.py`=passed; `uv run --project backend pytest -q backend/tests/test_territory_service.py backend/tests/test_territory_service_strict.py backend/tests/test_territory_api_e2e.py backend/tests/test_poi_correction_service.py`=43 passed | None | Optional runtime follow-up: close old browser tabs and reopen `/territories` + `/admin/territories/review` to confirm UI path with latest bundle. |
+
+### Changelog Addendum
+
+- 2026-02-25T12:17:13.5433303-05:00
+  - Change: Added strict service-level tests and API route-level tests for territory guardian flows; fixed malformed task/opportunity title interpolation and removed inline type/import issues in territory service.
+  - Conclusion: Territory plan backend automation now covers application submit/review, check-in/governance, task center aggregation, opportunities, and admin/public route wiring; all related tests passed.
+  - Risk: This round is backend-focused; browser-side interaction remains a runtime smoke-check step.
+
+## Session Update (2026-02-25 Phase 3.2 Closure Gate)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.2-008 | Phase 3.2 | Phase 3.2 closure after user manual acceptance | done | codex | 2026-02-25T13:16:11.2250066-05:00 | `PROGRESS.md` | User confirmed manual end-to-end verification passed for territory plan flows; prior technical gates already passed (`ruff/py_compile/pytest=43 passed`, frontend build/runtime consistency checks passed in P3-3.2-006). | None | Start Phase 3.3 requirement breakdown and create first implementation task in `in_progress`. |
+
+### Changelog Addendum
+
+- 2026-02-25T13:16:11.2250066-05:00
+  - Change: Recorded user-side manual acceptance as final closure evidence for Phase 3.2.
+  - Conclusion: Phase 3.2 is closed and eligible to transition to Phase 3.3.
+  - Risk: None at closure gate; any new issues will be tracked under Phase 3.3 tasks.
+
+## Session Update (2026-02-25 Phase 3.3 Bounty P0+P1 Implementation)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-001 | Phase 3.3 | Bounty tasks P0+P1 implementation (auto generation + board + GPS submit + reward + manual review) | test_passed | codex | 2026-02-25T15:00:00-05:00 | `backend/app/models/bounty.py`, `backend/alembic/versions/20260225_0017_create_bounty_tables.py`, `backend/app/schemas/bounty.py`, `backend/app/services/bounty_service.py`, `backend/app/api/v1/bounties.py`, `backend/app/api/v1/admin_bounties.py`, `backend/app/api/v1/router.py`, `backend/app/core/config.py`, `backend/.env.example`, `backend/app/models/__init__.py`, `backend/app/services/territory_service.py`, `backend/app/schemas/territory.py`, `backend/tests/test_bounty_service.py`, `backend/tests/test_bounty_api_e2e.py`, `backend/tests/test_territory_service_strict.py`, `frontend/src/api.ts`, `frontend/src/router.ts`, `frontend/src/App.vue`, `frontend/src/components/BountySubmitDialog.vue`, `frontend/src/pages/BountyBoardPage.vue`, `frontend/src/pages/AdminBountyReviewPage.vue`, `frontend/src/pages/PassportPage.vue`, `frontend/src/pages/TerritoryPage.vue`, `PROGRESS.md` | `uv run --project backend ruff check --ignore E501 backend/app/models/bounty.py backend/app/schemas/bounty.py backend/app/services/bounty_service.py backend/app/api/v1/bounties.py backend/app/api/v1/admin_bounties.py backend/app/api/v1/router.py backend/app/services/territory_service.py backend/app/schemas/territory.py backend/tests/test_bounty_api_e2e.py backend/tests/test_bounty_service.py backend/tests/test_territory_service_strict.py`=passed; `uv run --project backend pytest -q backend/tests/test_bounty_service.py backend/tests/test_bounty_api_e2e.py backend/tests/test_territory_service_strict.py backend/tests/test_territory_api_e2e.py`=34 passed; `uv run python -m alembic -c alembic.ini upgrade head`=passed; `uv run python -m alembic -c alembic.ini current`=`20260225_0017 (head)`; `pnpm --dir frontend lint`=passed (0 error, warnings only); `pnpm --dir frontend build`=passed | None | User closes old tabs and reopens `/bounties`, `/admin/bounties/review`, `/territories`, `/passport` for runtime acceptance; acceptance passed then move to `done`. |
+
+### Changelog Addendum
+
+- 2026-02-25T15:00:00-05:00
+  - Change: Implemented Phase 3.3 bounty full flow with new DB models/migration, user and admin APIs, GPS distance verification (500m), EXIF-based risk grading, high-frequency manual review threshold, contribution points settlement (`bounty_completed`), and frontend user/admin pages.
+  - Conclusion: P0+P1 planned capabilities are implemented and all automated gates passed; task is now at `test_passed` awaiting user runtime acceptance.
+  - Risk: Frontend lint still contains historical style warnings (non-blocking, no errors).
+- 2026-02-25T15:20:00-05:00
+  - Change: Completed frontend version consistency synchronization by restarting `atlas-frontend` and re-validating local/container/online artifacts.
+  - Evidence: local/container SHA256 matched for `src/router.ts`, `src/pages/BountyBoardPage.vue`, `src/pages/AdminBountyReviewPage.vue`; online source markers hit in `http://localhost:5173/src/router.ts` (`/bounties`, `BountyBoardPage`, `AdminBountyReviewPage`) and bounty pages (`submitBounty`, `nearby-hint-card`, `reviewAdminBountySubmission`).
+  - Risk: Browser-side runtime flow still needs user-side final acceptance after closing old tabs.
+
+## Session Update (2026-02-25 Phase 3.3 Bounty 404 Runtime Recovery)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-002 | Phase 3.3 | Bounty list runtime 404 diagnosis and recovery verification | test_passed | codex | 2026-02-25T16:42:27.3884095-05:00 | `PROGRESS.md` | Runtime routes rechecked: `GET http://localhost:8000/openapi.json` includes `/api/v1/bounties`; container runtime routes (`docker exec atlas-backend python -c "from app.main import app; ..."`) include `/api/v1/bounties`; authenticated API check (`GET /api/v1/bounties?scope=all&offset=0&limit=40`) returns `200` with JSON payload (`items=[]`); frontend online artifact check (`http://localhost:5173/src/api.ts`) confirms bounty API call marker (`List bounties request`, `/bounties?${params.toString()}`). | Historical runtime mismatch observed in logs (same endpoint previously returned 404 before service stabilization/restart), currently resolved | User closes old browser tabs and reopens `/bounties`, then reruns list/nearby/mine tabs; if all stable, move Phase 3.3 task to `done`. |
+
+### Changelog Addendum
+
+- 2026-02-25T16:42:27.3884095-05:00
+  - Change: Completed runtime-level recovery checks for reported `List bounties request failed with 404` symptom, including OpenAPI route presence, in-container loaded route verification, authenticated API probe, and frontend online artifact marker validation.
+  - Conclusion: Current runtime no longer reproduces bounty list 404; endpoint is available and returns normal JSON payload.
+  - Risk: User browser may still hold stale tab/runtime state; manual re-open verification is still required before closing Phase 3.3.
+
+## Session Update (2026-02-25 Editor V2 Feature Migration)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-003 | Phase 3.3 | Migrate legacy save/weather/collaboration/diff capabilities into Editor V2 | test_passed | codex | 2026-02-25T18:30:12-05:00 | `frontend/src/pages/EditorWorkbenchV2.vue`, `frontend/src/api.ts`, `frontend/src/router.ts`, `PROGRESS.md` | `docker compose -f infra/docker-compose.yml restart frontend`=passed; online route marker `http://localhost:5173/src/router.ts` hits `EditorWorkbenchV2` + `/editor/legacy`; online marker `http://localhost:5173/src/pages/EditorWorkbenchV2.vue` hits `TimelineWeatherStrip`/`CollabPanel`/`ItineraryDiffPanel`; `pnpm --dir frontend build`=passed | None | User closes old tabs and reopens `/editor` to confirm runtime flow for save start date, weather strip, collab panel, and diff actions. |
+
+### Changelog Addendum
+
+- 2026-02-25T18:30:00-05:00
+  - Change: Routed Editor V2 to use `useAuth` session, integrated start-date save + weather strip + collaboration panel + diff panel, and wired block/template APIs with optional `X-Collab-Grant` header support.
+  - Conclusion: Legacy editor core capabilities (save/weather/collab/diff) are now available in `EditorWorkbenchV2` workflow and compile-time type check passes.
+  - Risk: Full Vite production build and browser runtime acceptance are pending because current sandbox returns `spawn EPERM` for esbuild during `pnpm build`.
+
+- 2026-02-25T18:30:12-05:00
+  - Change: Restarted frontend runtime and revalidated online route/artifact markers for editor V2 delivery.
+  - Conclusion: Version consistency is restored for editor entrypoint (`/editor -> EditorWorkbenchV2`, `/editor/legacy` retained), and `pnpm --dir frontend build` now passes.
+  - Risk: Final runtime acceptance still needs user-side retest after closing old browser tabs.
+
+## Session Update (2026-02-25 Editor V2 Blocks Runtime Recovery + Contrast Fix)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-004 | Phase 3.3 | Fix Editor V2 block/template runtime failures and improve V2 panel contrast readability | test_passed | codex | 2026-02-25T18:40:15-05:00 | `backend/app/api/v1/blocks.py`, `backend/app/api/v1/block_templates.py`, `backend/app/services/block_service.py`, `backend/app/services/block_template_service.py`, `backend/tests/test_block_editor_api_e2e.py`, `frontend/src/components/CollabPanel.vue`, `frontend/src/components/ItineraryDiffPanel.vue`, `PROGRESS.md` | `uv run --project backend ruff check backend/app/api/v1/blocks.py backend/app/api/v1/block_templates.py backend/app/services/block_service.py backend/app/services/block_template_service.py backend/tests/test_block_editor_api_e2e.py`=passed; `uv run --project backend pytest -q backend/tests/test_block_editor_api_e2e.py`=2 passed; `pnpm --dir frontend build`=passed; `docker compose -f infra/docker-compose.yml restart backend`=passed; runtime probe `GET /api/v1/itineraries/{id}/blocks` now returns `401` (route present, no longer 404/500), `GET /api/v1/templates?sort_by=hot&offset=0&limit=5`=`200`; frontend online style artifact markers hit for `CollabPanel.vue?vue&type=style...` (`--panel-surface`, `.btn.danger`) and `ItineraryDiffPanel.vue?vue&type=style...` (`--surface-soft`, `.diff-line.modified`) | None | User closes old browser tabs and reopens `/editor`; re-login if prompted, then verify block loading and panel readability in Save/Collab/Diff areas. |
+
+### Changelog Addendum
+
+- 2026-02-25T18:40:15-05:00
+  - Change: Converted Editor V2 block/template API chain from async-session pattern to project-standard sync SQLAlchemy session usage (`get_db`), and added focused API regression tests for `/itineraries/{id}/blocks` and `/templates`.
+  - Conclusion: Editor V2 no longer fails due async/sync session mismatch (`ChunkedIteratorResult` await error); runtime endpoints are reachable and frontend build remains green.
+  - Risk: Existing user token may become invalid after backend restart, so browser-side retest may require re-login before re-verifying block interactions.
+
+- 2026-02-25T18:40:15-05:00
+  - Change: Added local dark-theme style overrides to `CollabPanel` and `ItineraryDiffPanel` to isolate V2 UI from legacy global light theme class styles (`panel-card`, `btn`, `input`, `subtle`).
+  - Conclusion: V2 collaboration and diff panels now use consistent high-contrast dark surfaces/text and no longer render with mixed light background + gray text.
+  - Risk: Final visual acceptance still depends on user-side runtime review after closing old tabs and reopening the page.
+
+## Session Update (2026-02-25 Editor V2 Canvas Priority + Minimap Map Initialization)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-005 | Phase 3.3 | Editor V2 canvas-first layout correction and minimap map initialization repair | test_passed | codex | 2026-02-25T18:52:25.1499007-05:00 | `frontend/src/pages/EditorWorkbenchV2.vue`, `frontend/src/components/editor/PreviewPanel.vue`, `PROGRESS.md` | `pnpm --dir frontend build`=passed; V2 now maps block coordinates into `mapItems` and passes selected block id to minimap; `PreviewPanel` now initializes AMap through `useAmap` and focuses marker on node selection; workspace layout now puts `TimelineTrack` in the main canvas and downgrades map to a fixed minimap window | None | User closes old browser tabs and reopens `/editor`, then verifies: (1) canvas is the primary area, (2) minimap is visible, (3) selecting a node recenters minimap |
+
+### Changelog Addendum
+
+- 2026-02-25T18:52:25.1499007-05:00
+  - Change: Refactored Editor V2 layout to prioritize timeline canvas, added fixed minimap panel, and implemented map initialization + marker rendering in `PreviewPanel`.
+  - Conclusion: Build gate passes and V2 now has a complete map render chain instead of an empty host container.
+  - Risk: Final runtime acceptance still depends on user-side retest after closing old tabs and reopening the editor page.
+
+## Session Update (2026-02-25 Editor V2 Runtime Version Sync Recheck)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-006 | Phase 3.3 | Editor V2 still-old-page symptom: runtime version consistency recheck and frontend restart sync | test_passed | codex | 2026-02-25T18:56:14.7753636-05:00 | `PROGRESS.md` | Version consistency evidence: local `EditorWorkbenchV2.vue` markers hit (`main-canvas`, `minimap-float`, `mapItems`); container `/app/src/pages/EditorWorkbenchV2.vue` markers hit; online artifact `http://localhost:5173/src/pages/EditorWorkbenchV2.vue?raw` contains `main-canvas`, `minimap-float`, `mapItems`; `http://localhost:5173/src/components/editor/PreviewPanel.vue?raw` contains `useAmap`, `syncMapState`, `mapItems`; `docker compose -f infra/docker-compose.yml restart frontend` executed and service back to `Up` | User browser may still hold stale tab/runtime state (old session) | User closes old tabs, opens `/editor` (not `/editor/legacy`) and performs one-pass runtime recheck |
+
+### Changelog Addendum
+
+- 2026-02-25T18:56:14.7753636-05:00
+  - Change: Performed three-way version consistency recheck and restarted frontend runtime after user reported still seeing old editor page.
+  - Conclusion: Runtime source chain is already on new Editor V2 implementation; remaining mismatch risk is browser-side stale tab/session path.
+  - Risk: Final acceptance depends on user-side reopen verification on `/editor`.
+
+## Session Update (2026-02-26 Editor V3 Canvas Redesign + Board API Upgrade)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| P3-3.3-007 | Phase 3.3 | Flow editor board V3 Phase A implementation (swimlane canvas + board aggregate API + dependency edges) | test_passed | codex | 2026-02-26T20:35:00-05:00 | `backend/app/models/itinerary_block.py`, `backend/app/models/itinerary_block_edge.py`, `backend/app/models/__init__.py`, `backend/alembic/versions/20260226_0019_editor_board_v3.py`, `backend/app/schemas/block.py`, `backend/app/services/block_service.py`, `backend/app/api/v1/blocks.py`, `backend/app/api/v1/block_templates.py`, `backend/app/services/block_template_service.py`, `backend/tests/test_block_editor_api_e2e.py`, `frontend/src/types/block.ts`, `frontend/src/api.ts`, `frontend/src/components/editor/TimelineTrack.vue`, `frontend/src/components/editor/BlockContainer.vue`, `frontend/src/components/editor/MaterialPanel.vue`, `frontend/src/components/editor/TemplateDetailPanel.vue`, `frontend/src/pages/EditorWorkbenchV2.vue`, `PROGRESS.md` | `uv run --project backend ruff check backend/app/api/v1/blocks.py backend/app/api/v1/block_templates.py backend/app/services/block_template_service.py backend/app/models/itinerary_block.py backend/app/models/itinerary_block_edge.py backend/app/schemas/block.py backend/app/services/block_service.py backend/tests/test_block_editor_api_e2e.py`=passed; `uv run --project backend pytest -q backend/tests/test_block_editor_api_e2e.py`=4 passed; `uv run python -m alembic -c alembic.ini upgrade head`=passed; `uv run python -m alembic -c alembic.ini current`=`20260226_0019(head)`; `pnpm --dir frontend build`=passed; `pnpm --dir frontend lint`=passed (warnings only, 0 error) | User-side runtime acceptance pending (canvas drag/drop lane scheduling, dependency creation, auto-layout interaction) | User closes old tabs and reopens `/editor`; verify swimlane canvas flow, dependency creation, auto-layout action, then promote to `done`. |
+
+### Changelog Addendum
+
+- 2026-02-26T20:35:00-05:00
+  - Change: Implemented board V3 data model extension (`lane_key/start_minute/end_minute/status/priority/risk_level/assignee/tags/ui_meta`) and dependency-edge table; added board aggregate API, layout-update API, batch update API, dependency CRUD API, and auto-layout API.
+  - Change: Rebuilt editor canvas into swimlane + day command board with dependency strip, drag-to-lane layout move, and auto-layout trigger; wired V2 page to board aggregate payload and new endpoints.
+  - Conclusion: Phase A technical gates passed (`ruff/pytest/frontend build`), and board redesign capability is now available for runtime validation.
+  - Risk: Final user-facing acceptance is still required for interactive drag/drop and dependency workflow in browser runtime.
+
+## Session Update (2026-03-08 Local Dev Bootstrap Script)
+
+| task_id | phase | title | status | owner | updated_at | files_changed | verification | blocker | next_action |
+|---|---|---|---|---|---|---|---|---|---|
+| DEVEX-BOOT-001 | DevEx | Add one-click local startup script for backend + frontend | done | codex | 2026-03-08T17:55:00-04:00 | `infra/scripts/start-local-stack.ps1`, `infra/scripts/start-local-stack.config.json`, `README.md`, `PROGRESS.md` | `powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1 -DryRun`=passed; PowerShell parser check for `infra/scripts/start-local-stack.ps1`=passed; README updated with one-command entry and optional flags | None | User can run `powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1` for local bootstrap; if team wants container one-click parity, add a matching wrapper for Docker mode later. |
+
+### Changelog Addendum
+
+- 2026-03-08T17:55:00-04:00
+  - Change: Added config-driven PowerShell bootstrap script that starts local Postgres dependency, prepares missing `.env` files from templates, installs backend/frontend dependencies, runs backend migrations, and launches backend/frontend in separate PowerShell windows.
+  - Conclusion: The repository now has a single entry command for local frontend/backend startup instead of manual multi-step bootstrapping.
+  - Risk: Actual startup still depends on local availability of `docker`, `uv`, and `pnpm`; the script validates these prerequisites and stops early when any command is missing.
+
+
+

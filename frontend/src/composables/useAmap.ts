@@ -10,9 +10,14 @@ type AmapMarker = {
   getPosition: () => unknown;
 };
 
+type AmapPolygon = {
+  on: (eventName: string, listener: () => void) => void;
+  setOptions: (options: Record<string, unknown>) => void;
+};
+
 type AmapMap = {
-  add: (marker: AmapMarker) => void;
-  remove: (marker: AmapMarker) => void;
+  add: (overlay: AmapMarker | AmapPolygon) => void;
+  remove: (overlay: AmapMarker | AmapPolygon) => void;
   setFitView: (
     overlays?: unknown,
     immediately?: boolean,
@@ -34,6 +39,15 @@ type AmapApi = {
     offset: unknown;
     label: { content: string; direction: string };
   }) => AmapMarker;
+  Polygon: new (options: {
+    path: [number, number][];
+    fillColor?: string;
+    fillOpacity?: number;
+    strokeColor?: string;
+    strokeWeight?: number;
+    extData?: unknown;
+    cursor?: string;
+  }) => AmapPolygon;
   Pixel: new (x: number, y: number) => unknown;
 };
 
@@ -56,9 +70,11 @@ function loadAmap() {
 export function useAmap(containerRef: Ref<HTMLElement | null>) {
   const mapReady = ref(false);
   const markersByItemId = new Map<string, AmapMarker>();
+  const polygonsById = new Map<string, AmapPolygon>();
   let mapInstance: AmapMap | null = null;
   let amapApi: AmapApi | null = null;
   let selectedMarker: AmapMarker | null = null;
+  let selectedPolygon: AmapPolygon | null = null;
 
   function callMarkerMethod(
     marker: AmapMarker,
@@ -102,6 +118,12 @@ export function useAmap(containerRef: Ref<HTMLElement | null>) {
     }
     markersByItemId.clear();
     selectedMarker = null;
+
+    for (const polygon of polygonsById.values()) {
+      mapInstance.remove(polygon);
+    }
+    polygonsById.clear();
+    selectedPolygon = null;
   }
 
   function renderMarkers(items: ItineraryItemWithPoi[], onClick: MarkerClickHandler) {
@@ -148,6 +170,76 @@ export function useAmap(containerRef: Ref<HTMLElement | null>) {
     mapInstance.setCenter(marker.getPosition());
   }
 
+  function parsePolygonWkt(wkt: string): [number, number][] {
+    const matches = wkt.match(/-?\d+(\.\d+)?\s+-?\d+(\.\d+)?/g);
+    if (!matches) return [];
+    return matches.map(m => {
+      const parts = m.split(/\s+/);
+      return [parseFloat(parts[0]), parseFloat(parts[1])];
+    });
+  }
+
+  function renderPolygons(
+    items: { id: string; boundary_wkt: string; name: string }[],
+    onClick?: (id: string) => void
+  ) {
+    if (!mapInstance || !amapApi) return;
+
+    for (const poly of polygonsById.values()) {
+      mapInstance.remove(poly);
+    }
+    polygonsById.clear();
+
+    if (items.length === 0) return;
+
+    for (const item of items) {
+      if (!item.boundary_wkt) continue;
+      const path = parsePolygonWkt(item.boundary_wkt);
+      if (path.length < 3) continue;
+
+      const polygon = new amapApi.Polygon({
+        path,
+        fillColor: "#3b82f6",
+        fillOpacity: 0.2,
+        strokeColor: "#2563eb",
+        strokeWeight: 2,
+        extData: { id: item.id },
+        cursor: onClick ? "pointer" : "default"
+      });
+
+      if (onClick) {
+        polygon.on("click", () => onClick(item.id));
+      }
+
+      mapInstance.add(polygon);
+      polygonsById.set(item.id, polygon);
+    }
+    mapInstance.setFitView(undefined, false, [20, 20, 20, 20], 14);
+  }
+
+  function checkPolygon(id: string) {
+    if (!mapInstance) return;
+    const polygon = polygonsById.get(id);
+    if (!polygon) return;
+
+    if (selectedPolygon && selectedPolygon !== polygon) {
+      selectedPolygon.setOptions({
+        fillColor: "#3b82f6",
+        fillOpacity: 0.2,
+        strokeColor: "#2563eb",
+        strokeWeight: 2,
+      });
+    }
+    selectedPolygon = polygon;
+    polygon.setOptions({
+      fillColor: "#f59e0b",
+      fillOpacity: 0.4,
+      strokeColor: "#b45309",
+      strokeWeight: 3,
+    });
+    mapInstance.setFitView([polygon], false, [20, 20, 20, 20], 15);
+  }
+
   function destroyMap() {
     clearMarkers();
     if (mapInstance) {
@@ -162,7 +254,9 @@ export function useAmap(containerRef: Ref<HTMLElement | null>) {
     mapReady,
     initMap,
     renderMarkers,
+    renderPolygons,
     focusMarker,
+    checkPolygon,
     clearMarkers,
     destroyMap
   };

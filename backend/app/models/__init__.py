@@ -1,4 +1,8 @@
+from app.models.block_template import BlockTemplate, BlockTemplateRating
+from app.models.bounty import BountySubmission, BountyTask
 from app.models.itinerary import Itinerary
+from app.models.itinerary_block import ItineraryBlock
+from app.models.itinerary_block_edge import ItineraryBlockEdge
 from app.models.itinerary_collab import (
     ItineraryCollabDocument,
     ItineraryCollabEventLog,
@@ -21,7 +25,6 @@ from app.models.territory import (
     TerritoryGuardian,
     TerritoryGuardianActivityLog,
     TerritoryGuardianApplication,
-    TerritoryGuardianReputationSnapshot,
     TerritoryRegion,
 )
 from app.models.user import User
@@ -33,6 +36,8 @@ __all__ = [
     "VerificationCode",
     "Poi",
     "Itinerary",
+    "ItineraryBlock",
+    "ItineraryBlockEdge",
     "ItineraryCollabLink",
     "ItineraryCollabSession",
     "ItineraryCollabDocument",
@@ -42,6 +47,10 @@ __all__ = [
     "ItineraryVisitLog",
     "ItineraryFork",
     "ItineraryDiffAction",
+    "BlockTemplate",
+    "BlockTemplateRating",
+    "BountyTask",
+    "BountySubmission",
     "PoiCorrectionType",
     "PoiCorrection",
     "PoiCorrectionNotification",
@@ -51,7 +60,6 @@ __all__ = [
     "TerritoryGuardianApplication",
     "TerritoryGuardian",
     "TerritoryGuardianActivityLog",
-    "TerritoryGuardianReputationSnapshot",
     "UserNotification",
     "UserContribution",
     "BadgeDef",

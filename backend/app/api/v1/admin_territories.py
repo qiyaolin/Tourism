@@ -9,16 +9,12 @@ from app.schemas.territory import (
     TerritoryGuardianApplicationListResponse,
     TerritoryGuardianApplicationResponse,
     TerritoryGuardianApplicationReviewPayload,
-    TerritoryGuardianReputationListResponse,
-    TerritoryGuardianResumeResponse,
     TerritoryRebuildResponse,
 )
 from app.security.deps import require_admin
 from app.services.territory_service import (
     list_guardian_applications,
-    list_guardian_reputation,
     rebuild_territory_regions,
-    resume_guardian,
     review_guardian_application,
 )
 
@@ -61,20 +57,3 @@ def rebuild_territories_api(
     _: User = Depends(require_admin),
 ) -> TerritoryRebuildResponse:
     return rebuild_territory_regions(db)
-
-
-@router.get("/guardians/reputation", response_model=TerritoryGuardianReputationListResponse)
-def list_guardian_reputation_api(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-) -> TerritoryGuardianReputationListResponse:
-    return list_guardian_reputation(db)
-
-
-@router.post("/guardians/{guardian_id}/resume", response_model=TerritoryGuardianResumeResponse)
-def resume_guardian_api(
-    guardian_id: UUID,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-) -> TerritoryGuardianResumeResponse:
-    return resume_guardian(db, guardian_id)

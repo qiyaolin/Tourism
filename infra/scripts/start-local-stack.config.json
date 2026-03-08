@@ -1,0 +1,42 @@
+{
+  "compose_file": "../docker-compose.yml",
+  "database_service": "postgres",
+  "shell_executable": "powershell",
+  "health_check": {
+    "retries": 90,
+    "interval_seconds": 2,
+    "timeout_seconds": 5
+  },
+  "default_services": [
+    "backend",
+    "frontend"
+  ],
+  "services": {
+    "backend": {
+      "working_directory": "../../backend",
+      "env_example": ".env.example",
+      "env_file": ".env",
+      "required_command": "uv",
+      "window_title": "Project Atlas Backend",
+      "install_command": "uv sync",
+      "prepare_command": "uv run alembic upgrade head",
+      "start_command": "uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+      "health_urls": [
+        "http://localhost:8000/api/v1/health/live",
+        "http://localhost:8000/api/v1/health/ready"
+      ]
+    },
+    "frontend": {
+      "working_directory": "../../frontend",
+      "env_example": ".env.example",
+      "env_file": ".env",
+      "required_command": "pnpm",
+      "window_title": "Project Atlas Frontend",
+      "install_command": "pnpm install",
+      "start_command": "pnpm dev --host 0.0.0.0 --port 5173",
+      "health_urls": [
+        "http://localhost:5173"
+      ]
+    }
+  }
+}

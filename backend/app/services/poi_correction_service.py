@@ -31,10 +31,13 @@ from app.services.notification_service import notify_correction_accepted
 from app.services.passport_service import evaluate_badges, record_contribution
 from app.services.storage import get_storage_provider
 from app.services.territory_service import (
+    _role_index,
     active_guardian_territory_ids,
     can_review_correction_in_territory,
     evaluate_guardian_governance,
     log_guardian_review_activity,
+    record_territory_contribution,
+    user_role_in_territory,
 )
 
 logger = logging.getLogger(__name__)
@@ -342,6 +345,19 @@ async def submit_correction(
         )
     db.commit()
     db.refresh(correction)
+
+    role = user_role_in_territory(db, current_user.id, poi.territory_id)
+    if role and _role_index(role) >= _role_index("regular"):
+        review_correction(
+            db, 
+            correction.id, 
+            "accepted", 
+            "系统自动通过：来自在地向导的可靠数据", 
+            current_user, 
+            auto_approve=True
+        )
+        db.refresh(correction)
+
     return _to_response(correction, correction_type)
 
 
@@ -457,6 +473,7 @@ def review_correction(
     action: str,
     review_comment: str | None,
     current_user: User,
+    auto_approve: bool = False,
 ) -> PoiCorrectionReviewResponse:
     evaluate_guardian_governance(db)
     correction = db.scalars(
@@ -468,7 +485,7 @@ def review_correction(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Correction already reviewed"
         )
-    if correction.reviewer_user_id is not None and correction.reviewer_user_id != current_user.id:
+    if not auto_approve and correction.reviewer_user_id is not None and correction.reviewer_user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to review this correction"
         )
@@ -486,11 +503,12 @@ def review_correction(
     if poi.territory_id is not None:
         territory = db.get(TerritoryRegion, poi.territory_id)
         territory_name = territory.name if territory else None
-    if not can_review_correction_in_territory(db, current_user, poi.territory_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to review corrections outside your territory",
-        )
+    if not auto_approve:
+        if not can_review_correction_in_territory(db, current_user, poi.territory_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed to review corrections outside your territory",
+            )
 
     correction.status = action
     correction.reviewer_user_id = current_user.id
@@ -511,8 +529,10 @@ def review_correction(
             db.add(poi)
             poi_updated = True
             db.add(correction)
-            if poi.territory_id is not None and current_user.role != "admin":
-                log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
+            if poi.territory_id is not None:
+                record_territory_contribution(db, correction.submitter_user_id, poi.territory_id, "correction_submit", correction.id)
+                if current_user.role != "admin" and not auto_approve:
+                    log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
             notify_correction_accepted(
                 db,
                 correction=correction,
@@ -599,8 +619,11 @@ def review_correction(
         poi_updated = True
 
     db.add(correction)
-    if poi.territory_id is not None and current_user.role != "admin":
-        log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
+    if poi.territory_id is not None:
+        if action == "accepted":
+            record_territory_contribution(db, correction.submitter_user_id, poi.territory_id, "correction_submit", correction.id)
+        if current_user.role != "admin" and not auto_approve:
+            log_guardian_review_activity(db, current_user.id, poi.territory_id, correction.id)
     if action == "accepted":
         try:
             record_contribution(

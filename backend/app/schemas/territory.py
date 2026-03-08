@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class TerritoryGuardianBrief(BaseModel):
     user_id: UUID
     nickname: str
+    role: str
     state: str
     granted_at: datetime
 
@@ -17,9 +18,10 @@ class TerritoryRegionItem(BaseModel):
     name: str
     status: str
     poi_count: int
-    boundary_wkt: str
-    centroid_wkt: str
+    boundary_wkt: str | None
+    centroid_wkt: str | None
     guardians: list[TerritoryGuardianBrief]
+    sample_pois: list[str] = []
 
 
 class TerritoryRegionListResponse(BaseModel):
@@ -70,27 +72,43 @@ class TerritoryGuardianCheckInResponse(BaseModel):
     checked_in_at: datetime
 
 
-class TerritoryGuardianReputationItem(BaseModel):
-    guardian_id: UUID
+# ---------- New: role-based profile & task center ----------
+
+
+class UserTerritoryRoleItem(BaseModel):
     territory_id: UUID
     territory_name: str
-    guardian_user_id: UUID
-    guardian_nickname: str
-    guardian_state: str
-    reviewed_count: int
-    accepted_count: int
-    accuracy: float
-    threshold: float
-    status: str
-    calculated_at: datetime
+    role: str  # regular / local_expert / area_guide / city_ambassador
+    state: str  # active / dormant / honorary
+    contribution_count: int
+    thanks_received: int
+    next_role: str | None
+    next_role_progress: float  # 0.0 ~ 1.0
 
 
-class TerritoryGuardianReputationListResponse(BaseModel):
-    items: list[TerritoryGuardianReputationItem]
+class UserTerritoryProfileResponse(BaseModel):
+    user_id: UUID
+    roles: list[UserTerritoryRoleItem]
+    total_contributions: int
+    total_thanks: int
 
 
-class TerritoryGuardianResumeResponse(BaseModel):
-    guardian_id: UUID
+class TaskCenterItem(BaseModel):
+    task_type: str  # pending_review / poi_verification / nearby_opportunity / bounty
+    title: str
+    territory_name: str
     territory_id: UUID
-    state: str
-    updated_at: datetime
+    target_id: UUID | None
+    points: int
+    created_at: datetime
+
+
+class TaskCenterResponse(BaseModel):
+    pending_reviews: int
+    items: list[TaskCenterItem]
+    monthly_contributions: int
+    monthly_helped_count: int
+
+class TerritoryOpportunityResponse(BaseModel):
+    territory_id: UUID
+    items: list[TaskCenterItem]

@@ -16,6 +16,25 @@ Run full stack in isolated containers:
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+Restart only frontend + backend quickly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1
+```
+
+Optional flags:
+
+```powershell
+# Restart specific services
+powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1 -Services backend,frontend
+
+# Restart and rebuild images
+powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1 -Rebuild
+
+# Preview commands without execution
+powershell -ExecutionPolicy Bypass -File infra/scripts/restart-services.ps1 -DryRun
+```
+
 Access:
 
 - Frontend: `http://localhost:5173`
@@ -23,6 +42,28 @@ Access:
 - Health live: `http://localhost:8000/api/v1/health/live`
 
 ### Option B: Local Runtime
+
+One command to start local database + backend + frontend:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1
+```
+
+Optional flags:
+
+```powershell
+# Start only backend or frontend
+powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1 -Services backend
+powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1 -Services frontend
+
+# Skip dependency install for repeated runs
+powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1 -SkipInstall
+
+# Preview the launch flow without executing commands
+powershell -ExecutionPolicy Bypass -File infra/scripts/start-local-stack.ps1 -DryRun
+```
+
+Manual equivalent:
 
 1. Start database:
 

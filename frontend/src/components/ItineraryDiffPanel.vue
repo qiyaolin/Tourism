@@ -502,3 +502,245 @@ function handleIgnore(payload: Omit<ActionEventPayload, "action" | "reason">) {
     </template>
   </section>
 </template>
+
+<style scoped>
+.diff-panel {
+  --text-primary: #e8edf8;
+  --text-secondary: #a7b3ca;
+  --border-subtle: rgba(255, 255, 255, 0.14);
+  --surface: #161b2c;
+  --surface-soft: #1c2438;
+  --primary: #4cc3ff;
+  --success: #6ee7a8;
+  --warning: #ffd27d;
+  --danger: #ff9c9c;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.panel-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.diff-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.diff-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.subtle {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.input {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.btn {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: #2f6df6;
+  border-color: #2f6df6;
+}
+
+.btn.ghost {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.diff-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.diff-badge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diff-badge.added {
+  background: rgba(77, 211, 142, 0.18);
+  color: #8ef0bd;
+}
+
+.diff-badge.removed {
+  background: rgba(255, 140, 140, 0.18);
+  color: #ffc1c1;
+}
+
+.diff-badge.modified {
+  background: rgba(255, 210, 125, 0.16);
+  color: #ffe1a7;
+}
+
+.diff-section {
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 10px;
+}
+
+.diff-section h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.diff-filter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-filter {
+  max-width: 180px;
+}
+
+.diff-day-group {
+  margin-top: 10px;
+}
+
+.diff-day-toggle {
+  width: 100%;
+  text-align: left;
+}
+
+.diff-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.diff-line {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+}
+
+.diff-line.added {
+  border-color: rgba(77, 211, 142, 0.45);
+  background: rgba(77, 211, 142, 0.12);
+}
+
+.diff-line.removed {
+  border-color: rgba(255, 140, 140, 0.42);
+  background: rgba(255, 140, 140, 0.12);
+}
+
+.diff-line.modified {
+  border-color: rgba(255, 210, 125, 0.45);
+  background: rgba(255, 210, 125, 0.1);
+}
+
+.diff-field {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.diff-change {
+  margin: 4px 0 0;
+  word-break: break-word;
+}
+
+.diff-state {
+  margin: 6px 0 0;
+}
+
+.diff-state-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.diff-state-tag.state-pending {
+  color: var(--text-secondary);
+}
+
+.diff-state-tag.state-applied {
+  color: var(--success);
+  border-color: rgba(110, 231, 168, 0.5);
+  background: rgba(110, 231, 168, 0.14);
+}
+
+.diff-state-tag.state-rollback {
+  color: var(--warning);
+  border-color: rgba(255, 210, 125, 0.5);
+  background: rgba(255, 210, 125, 0.14);
+}
+
+.diff-state-tag.state-ignored {
+  color: var(--primary);
+  border-color: rgba(76, 195, 255, 0.5);
+  background: rgba(76, 195, 255, 0.14);
+}
+
+.diff-state-tag.state-read {
+  color: var(--text-secondary);
+}
+
+.diff-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.diff-critical-list {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.diff-before {
+  color: #ffb4b4;
+}
+
+.diff-after {
+  color: #9af1c8;
+}
+
+.diff-arrow {
+  margin: 0 6px;
+  color: var(--text-secondary);
+}
+</style>
